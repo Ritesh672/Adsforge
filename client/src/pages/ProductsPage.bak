@@ -1,0 +1,45 @@
+import Topbar from '../components/Topbar';
+import { useState } from 'react';
+
+const defaultStart = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return d.toISOString().split('T')[0];
+};
+const today = () => new Date().toISOString().split('T')[0];
+
+export default function ProductsPage() {
+  const [activePeriod, setActivePeriod] = useState('30d');
+  const [dateRange, setDateRange] = useState({ start: defaultStart(), end: today() });
+
+  const handlePeriodChange = (p) => {
+    setActivePeriod(p);
+    const end = new Date();
+    const start = new Date();
+    const daysMap = { '7d': 7, '30d': 30, '90d': 90, '1y': 365 };
+    start.setDate(start.getDate() - (daysMap[p] || 30));
+    setDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] });
+  };
+
+  return (
+    <>
+      <Topbar
+        title="Products"
+        subtitle="Product-level revenue and performance"
+        dateRange={dateRange}
+        onDateChange={(r) => { setActivePeriod(null); setDateRange(r); }}
+        activePeriod={activePeriod}
+        onPeriodChange={handlePeriodChange}
+      />
+      <div className="page-content">
+        <div className="card" style={{ padding: 48, textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📦</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Products Page</div>
+          <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+            Coming soon — top sellers, dead variants, size intelligence and return analytics.
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
