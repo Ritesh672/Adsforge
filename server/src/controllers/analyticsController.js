@@ -570,21 +570,44 @@ exports.getPriceImpact = async (req, res) => {
 exports.getProductOverview = async (req, res) => {
   try {
     const range = getDateRange(req.query);
+    const rangeStart = new Date(`${range.start}T00:00:00`);
+    const prevEndDate = new Date(rangeStart);
+    prevEndDate.setDate(prevEndDate.getDate() - 1);
+
+    const prevStartDate = new Date(prevEndDate);
+    prevStartDate.setDate(prevStartDate.getDate() - (range.days - 1));
+
+    const prevStart = prevStartDate.toISOString().split('T')[0];
+    const prevEnd = prevEndDate.toISOString().split('T')[0];
 
     // 1. KPI Aggregates
     const kpiRes = await pool.query(`
-      SELECT 
-        COALESCE(SUM(total_price), 0)::FLOAT as revenue,
-        COALESCE(SUM(total_items), 0)::INTEGER as units,
-        COUNT(DISTINCT id)::INTEGER as orders,
-        (SELECT COUNT(*) FROM products WHERE status = 'active')::INTEGER as active_products,
-        (
-          SELECT (COUNT(*)::FLOAT / NULLIF((SELECT COUNT(*) FROM orders WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2), 0)::FLOAT * 100)
-          FROM returns WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
-        )::FLOAT as return_rate
-      FROM orders
-      WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2 AND financial_status != 'voided'
-    `, [range.start, range.end]);
+      WITH period_orders AS (
+        SELECT *
+        FROM orders
+        WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1
+          AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
+      ),
+      previous_orders AS (
+        SELECT *
+        FROM orders
+        WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $3
+          AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $4
+      )
+      SELECT
+        COALESCE(SUM(total_price) FILTER (WHERE financial_status != 'voided'), 0)::FLOAT as revenue,
+        COALESCE(SUM(total_items) FILTER (WHERE financial_status != 'voided'), 0)::INTEGER as units,
+        (COUNT(DISTINCT id) FILTER (WHERE financial_status != 'voided'))::INTEGER as orders,
+        (COUNT(DISTINCT id) FILTER (WHERE financial_status = 'voided'))::INTEGER as cancelled_orders,
+        CASE WHEN COUNT(DISTINCT id) > 0
+             THEN ((COUNT(DISTINCT id) FILTER (WHERE financial_status = 'voided'))::FLOAT / COUNT(DISTINCT id)::FLOAT * 100)
+             ELSE 0 END::FLOAT as cancel_rate,
+        (SELECT COALESCE(SUM(total_price), 0)::FLOAT FROM previous_orders WHERE financial_status != 'voided') as prev_revenue,
+        (SELECT COALESCE(SUM(total_items), 0)::INTEGER FROM previous_orders WHERE financial_status != 'voided') as prev_units,
+        (SELECT COUNT(DISTINCT id)::INTEGER FROM previous_orders WHERE financial_status = 'voided') as prev_cancelled_orders,
+        (SELECT COUNT(*) FROM products WHERE status = 'active')::INTEGER as active_products
+      FROM period_orders
+    `, [range.start, range.end, prevStart, prevEnd]);
 
     // 2. Portfolio Concentration (Top 5 Products Share)
     const concentrationRes = await pool.query(`
@@ -615,6 +638,7 @@ exports.getProductOverview = async (req, res) => {
     const seriesStep = isSingleDay ? '1 hour' : '1 day';
     const seriesStart = isSingleDay ? `${range.start} 00:00:00` : range.start;
     const seriesEnd = isSingleDay ? `${range.end} 23:59:59` : range.end;
+    const chartFilterEnd = `${range.end} 23:59:59`;
 
     const chartRes = await pool.query(`
       WITH date_range AS (
@@ -623,22 +647,15 @@ exports.getProductOverview = async (req, res) => {
       daily_sales AS (
         SELECT 
           ${isSingleDay ? "date_trunc('hour', o.ordered_at AT TIME ZONE 'Asia/Kolkata')" : "(o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date"} as date,
-          SUM(o.total_price) as revenue,
-          SUM(o.total_items) as units,
-          COUNT(DISTINCT o.id) as orders,
-          COUNT(DISTINCT oli.product_id) as active_products
+          SUM(o.total_price) FILTER (WHERE o.financial_status != 'voided') as revenue,
+          SUM(o.total_items) FILTER (WHERE o.financial_status != 'voided') as units,
+          COUNT(DISTINCT o.id) FILTER (WHERE o.financial_status != 'voided') as orders,
+          COUNT(DISTINCT o.id) FILTER (WHERE o.financial_status = 'voided') as cancelled_orders,
+          COUNT(DISTINCT oli.product_id) FILTER (WHERE o.financial_status != 'voided') as active_products
         FROM orders o
         LEFT JOIN order_line_items oli ON o.id = oli.order_id
-        WHERE o.financial_status != 'voided'
-        AND o.ordered_at >= $1 AND o.ordered_at <= $2
-        GROUP BY 1
-      ),
-      daily_returns AS (
-        SELECT 
-          ${isSingleDay ? "date_trunc('hour', created_at AT TIME ZONE 'Asia/Kolkata')" : "(created_at AT TIME ZONE 'Asia/Kolkata')::date"} as date,
-          COUNT(*) as return_count
-        FROM returns
-        WHERE created_at >= $1 AND created_at <= $2
+        WHERE o.ordered_at AT TIME ZONE 'Asia/Kolkata' >= $1::TIMESTAMP
+          AND o.ordered_at AT TIME ZONE 'Asia/Kolkata' <= $4::TIMESTAMP
         GROUP BY 1
       )
       SELECT 
@@ -646,15 +663,16 @@ exports.getProductOverview = async (req, res) => {
         COALESCE(ds.revenue, 0)::FLOAT as revenue,
         COALESCE(ds.units, 0)::INTEGER as units,
         COALESCE(ds.orders, 0)::INTEGER as orders,
-        COALESCE(dret.return_count, 0)::INTEGER as returns,
-        CASE WHEN COALESCE(ds.units, 0) > 0 THEN (COALESCE(dret.return_count, 0)::FLOAT / ds.units) * 100 ELSE 0 END as return_rate,
+        COALESCE(ds.cancelled_orders, 0)::INTEGER as cancelled_orders,
+        CASE WHEN COALESCE(ds.orders, 0) + COALESCE(ds.cancelled_orders, 0) > 0
+             THEN (COALESCE(ds.cancelled_orders, 0)::FLOAT / (COALESCE(ds.orders, 0) + COALESCE(ds.cancelled_orders, 0))::FLOAT * 100)
+             ELSE 0 END::FLOAT as cancel_rate,
         COALESCE(ds.active_products, 0)::INTEGER as active_products,
         CASE WHEN COALESCE(ds.orders, 0) > 0 THEN ds.revenue / ds.orders ELSE 0 END as aov
       FROM date_range dr
       LEFT JOIN daily_sales ds ON ds.date = dr.date
-      LEFT JOIN daily_returns dret ON dret.date = dr.date
       ORDER BY dr.date ASC
-    `, [seriesStart, seriesEnd, seriesStep]);
+    `, [seriesStart, seriesEnd, seriesStep, chartFilterEnd]);
 
     // 4. Category Breakdown
     const categoryRes = await pool.query(`
@@ -720,6 +738,10 @@ exports.getProductOverview = async (req, res) => {
     `);
 
     const kpi = kpiRes.rows[0];
+    const percentChange = (current, previous) => (
+      Number(previous) > 0 ? ((Number(current || 0) - Number(previous)) / Number(previous) * 100) : null
+    );
+
     res.json({
       success: true,
       data: {
@@ -727,7 +749,11 @@ exports.getProductOverview = async (req, res) => {
           revenue: kpi.revenue,
           units: kpi.units,
           active_products: kpi.active_products,
-          return_rate: kpi.return_rate,
+          cancelled_orders: kpi.cancelled_orders,
+          cancel_rate: kpi.cancel_rate,
+          revenue_change_pct: percentChange(kpi.revenue, kpi.prev_revenue),
+          units_change_pct: percentChange(kpi.units, kpi.prev_units),
+          cancelled_orders_change_pct: percentChange(kpi.cancelled_orders, kpi.prev_cancelled_orders),
           dead_stock_pct: deadStockRes.rows[0]?.dead_stock_pct || 0,
           concentration_pct: concentrationRes.rows[0]?.concentration_pct || 0
         },

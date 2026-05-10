@@ -106,7 +106,7 @@ const ProductExplorerCard = ({ product, onOpen }) => (
           <strong>{product.orders.toLocaleString('en-IN')}</strong>
         </div>
         <div>
-          <span>Returns</span>
+          <span>Cancelled</span>
           <strong>{product.returns.toLocaleString('en-IN')}</strong>
         </div>
       </div>

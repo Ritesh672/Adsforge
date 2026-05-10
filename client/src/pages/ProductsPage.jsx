@@ -114,20 +114,18 @@ export default function ProductsPage() {
     const metricLabels = {
       revenue: 'Total Revenue',
       units: 'Units Sold',
-      return_rate: 'Return Percentage',
+      cancelled_orders: 'Cancelled Orders',
     };
 
     const metricColors = {
       revenue: '#6c63ff',
       units: '#00d4a0',
-      return_rate: '#ff453a',
+      cancelled_orders: '#ff453a',
     };
 
     const metricType = selectedMetric === 'revenue'
       ? 'currency'
-      : selectedMetric === 'return_rate'
-        ? 'pct'
-        : 'number';
+      : 'number';
 
     return (
       <div className="products-overview">
@@ -145,6 +143,7 @@ export default function ProductsPage() {
             valueType="currency"
             icon="$"
             color="blue"
+            change={kpi.revenue_change_pct}
             onClick={() => setSelectedMetric('revenue')}
             isActive={selectedMetric === 'revenue'}
           />
@@ -154,17 +153,21 @@ export default function ProductsPage() {
             valueType="number"
             icon="#"
             color="green"
+            change={kpi.units_change_pct}
             onClick={() => setSelectedMetric('units')}
             isActive={selectedMetric === 'units'}
           />
           <StatCard
-            label="Return Rate"
-            value={loading ? null : kpi.return_rate}
-            valueType="pct"
-            icon="%"
+            label="Cancelled Orders"
+            value={loading ? null : kpi.cancelled_orders}
+            valueType="number"
+            icon="X"
             color="red"
-            onClick={() => setSelectedMetric('return_rate')}
-            isActive={selectedMetric === 'return_rate'}
+            change={kpi.cancelled_orders_change_pct}
+            changeLabel="vs prev period"
+            helperText={`${Number(kpi.cancel_rate || 0).toFixed(1)}% cancel rate`}
+            onClick={() => setSelectedMetric('cancelled_orders')}
+            isActive={selectedMetric === 'cancelled_orders'}
           />
           <StatCard
             label="Active Products"
@@ -172,6 +175,7 @@ export default function ProductsPage() {
             valueType="number"
             icon="A"
             color="purple"
+            showComparison={false}
           />
         </div>
 
