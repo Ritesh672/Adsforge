@@ -388,8 +388,8 @@ exports.getPareto = async (req, res) => {
       SELECT COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as total
       FROM order_line_items oli
       JOIN orders o ON oli.order_id = o.id
-      WHERE (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 
-      AND (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+      WHERE (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 
+      AND (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
       AND o.financial_status != 'voided'
     `, [range.start, range.end]);
     const totalRevenue = totalRevenueRes.rows[0].total;
@@ -402,8 +402,8 @@ exports.getPareto = async (req, res) => {
       FROM products p
       JOIN order_line_items oli ON p.id = oli.product_id
       JOIN orders o ON oli.order_id = o.id
-      WHERE (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 
-      AND (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+      WHERE (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 
+      AND (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
       AND o.financial_status != 'voided'
       GROUP BY p.id, p.title
       ORDER BY revenue DESC
@@ -579,11 +579,11 @@ exports.getProductOverview = async (req, res) => {
         COUNT(DISTINCT id)::INTEGER as orders,
         (SELECT COUNT(*) FROM products WHERE status = 'active')::INTEGER as active_products,
         (
-          SELECT (COUNT(*)::FLOAT / NULLIF((SELECT COUNT(*) FROM orders WHERE (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2), 0)::FLOAT * 100)
-          FROM returns WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+          SELECT (COUNT(*)::FLOAT / NULLIF((SELECT COUNT(*) FROM orders WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2), 0)::FLOAT * 100)
+          FROM returns WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
         )::FLOAT as return_rate
       FROM orders
-      WHERE (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2 AND financial_status != 'voided'
+      WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2 AND financial_status != 'voided'
     `, [range.start, range.end]);
 
     // 2. Portfolio Concentration (Top 5 Products Share)
@@ -594,7 +594,7 @@ exports.getProductOverview = async (req, res) => {
           SUM(oli.price * oli.quantity) as revenue
         FROM order_line_items oli
         JOIN orders o ON oli.order_id = o.id
-        WHERE (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+        WHERE (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
         GROUP BY 1
       ),
       total_revenue AS (
@@ -622,7 +622,7 @@ exports.getProductOverview = async (req, res) => {
       ),
       daily_sales AS (
         SELECT 
-          ${isSingleDay ? "date_trunc('hour', o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')" : "(o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"} as date,
+          ${isSingleDay ? "date_trunc('hour', o.ordered_at AT TIME ZONE 'Asia/Kolkata')" : "(o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date"} as date,
           SUM(o.total_price) as revenue,
           SUM(o.total_items) as units,
           COUNT(DISTINCT o.id) as orders,
@@ -635,7 +635,7 @@ exports.getProductOverview = async (req, res) => {
       ),
       daily_returns AS (
         SELECT 
-          ${isSingleDay ? "date_trunc('hour', created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')" : "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"} as date,
+          ${isSingleDay ? "date_trunc('hour', created_at AT TIME ZONE 'Asia/Kolkata')" : "(created_at AT TIME ZONE 'Asia/Kolkata')::date"} as date,
           COUNT(*) as return_count
         FROM returns
         WHERE created_at >= $1 AND created_at <= $2
@@ -665,7 +665,7 @@ exports.getProductOverview = async (req, res) => {
       FROM order_line_items oli
       JOIN orders o ON oli.order_id = o.id
       LEFT JOIN products p ON oli.product_id = p.id
-      WHERE (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (o.ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+      WHERE (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (o.ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
       GROUP BY 1
       ORDER BY revenue DESC
       LIMIT 5

@@ -31,8 +31,8 @@ exports.getDateRange = (query) => {
       end: query.end_date,
       days: diffDays + 1,
       sqlFilter: `date >= $1 AND date <= $2`,
-      sqlFilterAlt: `ordered_at::date >= $1 AND ordered_at::date <= $2`, // for tables that use ordered_at
-      sqlFilterCreatedAt: `created_at::date >= $1 AND created_at::date <= $2`, // for tables that use created_at
+      sqlFilterAlt: `(ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2`, // for tables that use ordered_at
+      sqlFilterCreatedAt: `(created_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date <= $2`, // for tables that use created_at
       params: [query.start_date, query.end_date]
     };
   }
@@ -77,8 +77,8 @@ exports.getDateRange = (query) => {
     end,
     days: Math.max(1, diffDays + 1),
     sqlFilter: `date >= $1 AND date <= $2`,
-    sqlFilterAlt: `ordered_at::date >= $1 AND ordered_at::date <= $2`,
-    sqlFilterCreatedAt: `created_at::date >= $1 AND created_at::date <= $2`,
+    sqlFilterAlt: `(ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2`,
+    sqlFilterCreatedAt: `(created_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date <= $2`,
     params: [start, end]
   };
 };

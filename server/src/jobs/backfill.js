@@ -255,7 +255,9 @@ const runIncrementalSync = async () => {
     const lastOrderRes = await pool.query('SELECT MAX(ordered_at) FROM orders');
     const lastOrderDate = lastOrderRes.rows[0]?.max;
     
-    const sinceDate = lastOrderDate ? new Date(new Date(lastOrderDate).getTime() + 60000) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // Re-read a short overlap because Shopify can return multiple orders in the same minute
+    // and late writes can arrive around the previous high-water mark. Upserts prevent duplicates.
+    const sinceDate = lastOrderDate ? new Date(new Date(lastOrderDate).getTime() - 10 * 60 * 1000) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     log(`🔍 Syncing orders since: ${sinceDate.toISOString()}`);
 
     const orders = await fetchAllOrders(null, sinceDate);

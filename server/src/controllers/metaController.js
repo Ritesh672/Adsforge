@@ -53,8 +53,8 @@ exports.getOverview = async (req, res) => {
         COUNT(*)::INTEGER as shopify_orders,
         COALESCE(SUM(total_items), 0)::INTEGER as shopify_units
       FROM orders
-      WHERE (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 
-      AND (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+      WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 
+      AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
       AND financial_status != 'voided'
     `, [range.start, range.end]);
 
@@ -123,12 +123,12 @@ exports.getDailyData = async (req, res) => {
         ),
         hourly_shopify AS (
           SELECT
-            DATE_PART('hour', ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour,
+            DATE_PART('hour', ordered_at AT TIME ZONE 'Asia/Kolkata') as hour,
             SUM(total_price) as revenue,
             COUNT(*) as orders,
             SUM(total_items) as units
           FROM orders
-          WHERE (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = $1
+          WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date = $1
           AND financial_status != 'voided'
           GROUP BY 1
         ),
@@ -180,14 +180,14 @@ exports.getDailyData = async (req, res) => {
         ),
         daily_shopify AS (
           SELECT
-            (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date as date,
+            (ordered_at AT TIME ZONE 'Asia/Kolkata')::date as date,
             SUM(total_price) as shopify_revenue,
             COUNT(*) as shopify_orders,
             SUM(total_items) as shopify_units,
             AVG(total_price) as avg_order_value
           FROM orders
           WHERE financial_status != 'voided'
-          AND (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <= $2
+          AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
           GROUP BY 1
         )
         SELECT
