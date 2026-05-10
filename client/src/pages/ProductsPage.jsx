@@ -38,21 +38,33 @@ export default function ProductsPage() {
   const [paretoData, setParetoData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paretoLoading, setParetoLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState(null);
 
   const fetchData = useCallback(async (params) => {
     setLoading(true);
     setParetoLoading(true);
+    setOverviewError(null);
 
     try {
-      const [overviewRes, paretoRes] = await Promise.all([
+      const [overviewResult, paretoResult] = await Promise.allSettled([
         getProductOverview(params),
         getPareto(params),
       ]);
 
-      setData(overviewRes.data);
-      setParetoData(paretoRes.data);
-    } catch (error) {
-      console.error(error);
+      if (overviewResult.status === 'fulfilled') {
+        setData(overviewResult.value.data);
+      } else {
+        console.error(overviewResult.reason);
+        setData(null);
+        setOverviewError('Product overview data could not be loaded.');
+      }
+
+      if (paretoResult.status === 'fulfilled') {
+        setParetoData(paretoResult.value.data);
+      } else {
+        console.error(paretoResult.reason);
+        setParetoData(null);
+      }
     } finally {
       setLoading(false);
       setParetoLoading(false);
@@ -119,6 +131,13 @@ export default function ProductsPage() {
 
     return (
       <div className="products-overview">
+        {overviewError && (
+          <div className="empty-state product-empty-state" style={{ marginBottom: 16 }}>
+            <div className="empty-state-icon">Overview unavailable</div>
+            <p>{overviewError}</p>
+          </div>
+        )}
+
         <div className="stats-grid">
           <StatCard
             label="Total Revenue"
