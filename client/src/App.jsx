@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import Sidebar from './components/Sidebar';
+import AppLayout from './components/AppLayout';
 import Dashboard from './pages/Dashboard';
 import AdsPage from './pages/AdsPage';
 import ProductsPage from './pages/ProductsPage';
@@ -26,16 +26,13 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className="app-layout">
-        <Sidebar syncStatus={syncStatus} onSyncNow={handleSyncNow} />
-        <div className="main-content">
+      <AppLayout syncStatus={syncStatus} onSyncNow={handleSyncNow}>
           <Routes>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/ads"      element={<AdsPage />} />
             <Route path="/products" element={<ProductsPage />} />
           </Routes>
-        </div>
-      </div>
+      </AppLayout>
     </BrowserRouter>
   );
 }

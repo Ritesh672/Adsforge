@@ -220,7 +220,7 @@ export default function AdsPage() {
             SECTION 1: TOP KPI CONTROL CARDS
             ═══════════════════════════════════════════════════════════ */}
         <div style={{ marginBottom: '32px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+          <div className="ads-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
             {kpiData.map(kpi => (
               <KPICard 
                 key={kpi.id}
@@ -239,7 +239,7 @@ export default function AdsPage() {
         {/* ═══════════════════════════════════════════════════════════
             SECTION 2: ANALYTICS GRAPH AREA (2 COLUMNS)
             ═══════════════════════════════════════════════════════════ */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px' }}>
+        <div className="ads-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px' }}>
           
           {/* LEFT: Dynamic Metric Trend Chart */}
           <div className="card" style={{ padding: '28px', display: 'flex', flexDirection: 'column' }}>
@@ -388,7 +388,7 @@ export default function AdsPage() {
         {/* ═══════════════════════════════════════════════════════════
             SECTION 4: FUNNEL ANALYTICS GRAPHS (2 COLUMNS)
             ═══════════════════════════════════════════════════════════ */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px' }}>
+        <div className="ads-chart-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px' }}>
           
           {/* LEFT: Conversion Funnel Visualization */}
           <div className="card" style={{ padding: '28px' }}>
@@ -522,7 +522,7 @@ export default function AdsPage() {
             SECTION 5: DAILY BREAKDOWN TABLE
             ═══════════════════════════════════════════════════════════ */}
         <div className="card" style={{ overflow: 'hidden', marginBottom: '20px' }}>
-          <div style={{ 
+          <div className="ads-table-header" style={{ 
             padding: '24px 28px',
             background: 'rgba(255,255,255,0.01)',
             borderBottom: '1px solid var(--border)',
