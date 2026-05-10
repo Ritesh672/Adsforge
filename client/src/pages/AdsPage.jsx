@@ -149,12 +149,32 @@ export default function AdsPage() {
     fetchData({ start_date: dateRange.start, end_date: dateRange.end });
   }, [dateRange, fetchData]);
 
+  useEffect(() => {
+    const refreshAfterSync = () => {
+      fetchData({ start_date: dateRange.start, end_date: dateRange.end });
+    };
+
+    window.addEventListener('adforge:sync-complete', refreshAfterSync);
+    return () => window.removeEventListener('adforge:sync-complete', refreshAfterSync);
+  }, [dateRange.end, dateRange.start, fetchData]);
+
   const handlePeriodChange = (p) => {
     setActivePeriod(p);
+
+    if (p === 'today') {
+      const today = getLocalDate();
+      setDateRange({ start: today, end: today });
+      return;
+    }
+
+    if (p === 'yesterday') {
+      const yesterday = getLocalDate(-1);
+      setDateRange({ start: yesterday, end: yesterday });
+      return;
+    }
+
     let start;
-    if (p === 'today') start = getLocalDate();
-    else if (p === 'yesterday') start = getLocalDate(-1);
-    else if (p === '7d') start = getLocalDate(-7);
+    if (p === '7d') start = getLocalDate(-7);
     else if (p === '30d') start = getLocalDate(-30);
     else if (p === '90d') start = getLocalDate(-90);
     setDateRange({ start, end: getLocalDate(-1) });
@@ -177,6 +197,33 @@ export default function AdsPage() {
     { id: 'frequency', label: 'Frequency', value: overview?.avg_frequency?.toFixed(2), icon: '🔄', trend: '2.3', trendUp: false },
   ];
 
+  const trendFor = (metric) => {
+    const change = overview?.changes?.[metric];
+
+    return {
+      trend: change === null || change === undefined ? null : Math.abs(change).toFixed(1),
+      trendUp: Number(change || 0) >= 0,
+    };
+  };
+
+  const kpiTrendMap = {
+    revenue: 'shopify_revenue',
+    spend: 'total_spend',
+    roas: 'real_roas',
+    aov: 'avg_order_value',
+  };
+  const funnelTrendMap = {
+    impressions: 'total_impressions',
+    reach: 'total_reach',
+    clicks: 'total_clicks',
+    meta_add_to_cart: 'meta_add_to_cart',
+    meta_initiate_checkout: 'meta_initiate_checkout',
+    meta_purchases: 'meta_purchases',
+    frequency: 'avg_frequency',
+  };
+  const kpiCards = kpiData.map((item) => ({ ...item, ...trendFor(kpiTrendMap[item.id]) }));
+  const funnelCards = funnelMetrics.map((item) => ({ ...item, ...trendFor(funnelTrendMap[item.id]) }));
+
   const formatFunnelValue = (value) => {
     const safeValue = Number(value || 0);
     if (safeValue >= 1000000) return `${(safeValue / 1000000).toFixed(2)}M`;
@@ -198,9 +245,8 @@ export default function AdsPage() {
     { label: 'Purchase', value: overview?.meta_purchases },
   ];
   const conversionMaxFunnel = Math.max(...conversionFunnelBars.map(b => b.value || 0));
-
   const getMetricLabel = (id) => {
-    return kpiData.find(k => k.id === id)?.label || conversionFunnelMetrics.find(f => f.id === id)?.label || funnelMetrics.find(f => f.id === id)?.label || id;
+    return kpiCards.find(k => k.id === id)?.label || conversionFunnelMetrics.find(f => f.id === id)?.label || funnelCards.find(f => f.id === id)?.label || id;
   };
 
   return (
@@ -221,7 +267,7 @@ export default function AdsPage() {
             ═══════════════════════════════════════════════════════════ */}
         <div style={{ marginBottom: '32px' }}>
           <div className="ads-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-            {kpiData.map(kpi => (
+            {kpiCards.map(kpi => (
               <KPICard 
                 key={kpi.id}
                 {...kpi}

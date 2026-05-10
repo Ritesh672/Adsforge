@@ -11,7 +11,17 @@ const navItems = [
   }
 ];
 
-export default function Sidebar({ syncStatus, onSyncNow }) {
+const formatLastSynced = (value) => {
+  if (!value) return 'Last synced time unavailable';
+
+  return `Last synced at ${new Date(value).toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })}`;
+};
+
+export default function Sidebar({ syncStatus, lastSyncedAt, onSyncNow }) {
   const isSyncing = syncStatus === 'syncing';
 
   return (
@@ -70,7 +80,9 @@ export default function Sidebar({ syncStatus, onSyncNow }) {
               {isSyncing ? 'Syncing data...' :
                syncStatus === 'error'   ? 'Sync failed'    : 'Data up to date'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>Manual Meta + Shopify sync</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+              {isSyncing ? 'Meta first, Shopify may take longer' : formatLastSynced(lastSyncedAt)}
+            </div>
           </div>
         </div>
       </div>

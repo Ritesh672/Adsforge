@@ -80,6 +80,19 @@ export default function ProductsPage() {
     }
   }, [dateRange.end, dateRange.start, fetchData, period]);
 
+  useEffect(() => {
+    const refreshAfterSync = () => {
+      if (period === 'custom') {
+        fetchData({ start_date: dateRange.start, end_date: dateRange.end });
+      } else {
+        fetchData({ period });
+      }
+    };
+
+    window.addEventListener('adforge:sync-complete', refreshAfterSync);
+    return () => window.removeEventListener('adforge:sync-complete', refreshAfterSync);
+  }, [dateRange.end, dateRange.start, fetchData, period]);
+
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
 

@@ -30,6 +30,7 @@ export const triggerMetaSync = ()       => api.post('/meta/sync');
 export const triggerShopifySync = () => api.post('/sync/incremental');
 export const triggerShopifyBackfill = () => api.post('/sync/backfill');
 export const triggerUnifiedSync = () => api.post('/sync/all');
+export const getSyncStatus = () => api.get('/sync/status');
 
 // Products
 export const getTopProducts = (params) => api.get('/products', params);

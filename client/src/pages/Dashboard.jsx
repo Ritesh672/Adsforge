@@ -20,6 +20,19 @@ const getCompletedPeriodRange = (days) => ({
   end: getLocalDate(-1),
 });
 
+const getPreviousPeriodRange = ({ start, end }) => {
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  const days = Math.max(1, Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
+  const prevEnd = new Date(startDate);
+  prevEnd.setDate(prevEnd.getDate() - 1);
+  const prevStart = new Date(prevEnd);
+  prevStart.setDate(prevStart.getDate() - (days - 1));
+  const format = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+  return { start: format(prevStart), end: format(prevEnd) };
+};
+
 export default function Dashboard() {
   const [activePeriod, setActivePeriod] = useState('30d');
   const [dateRange, setDateRange] = useState(getCompletedPeriodRange(30));
@@ -45,20 +58,33 @@ export default function Dashboard() {
         getMetaDaily(params),
         getTopProducts({ ...params, sort: 'revenue', limit: 8 }),
       ]);
+      const prevRange = getPreviousPeriodRange({ start: params.start_date, end: params.end_date });
+      const prevDaily = await getMetaDaily({ start_date: prevRange.start, end_date: prevRange.end });
       setOverview(ov.data);
 
       // Build chart data with previous period reference
       const rows = dl.data?.daily || [];
+      const prevRows = prevDaily.data?.daily || [];
       setDailyData(dl.data); // Capture the whole response including is_hourly flag
       
-      const chartRows = rows.map(r => ({
-        ...r,
-        revenue: r.revenue,
-        spend: r.spend,
-        roas: r.real_roas,
-        cpa: r.cost_per_order ?? (r.orders > 0 ? r.spend / r.orders : 0),
-        orders: r.orders,
-      }));
+      const chartRows = rows.map((r, index) => {
+        const prev = prevRows[index] || {};
+        const prevSpend = Number(prev.spend || 0);
+
+        return {
+          ...r,
+          revenue: r.revenue,
+          spend: Number(r.spend || 0),
+          roas: r.real_roas,
+          cpa: r.cost_per_order ?? (r.orders > 0 ? Number(r.spend || 0) / r.orders : 0),
+          orders: r.orders,
+          prev_revenue: prev.revenue || 0,
+          prev_spend: prevSpend,
+          prev_roas: prev.real_roas || 0,
+          prev_orders: prev.orders || 0,
+          prev_cpa: prev.cost_per_order ?? (prev.orders > 0 ? prevSpend / prev.orders : 0),
+        };
+      });
       setDaily(chartRows);
       setProducts(prods.data || []);
     } catch (e) {
@@ -73,6 +99,16 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData(params);
   }, [dateRange, fetchData]);
+
+  useEffect(() => {
+    const refreshAfterSync = () => {
+      fetchData({ start_date: dateRange.start, end_date: dateRange.end });
+      addLog('success', 'Dashboard refreshed after sync');
+    };
+
+    window.addEventListener('adforge:sync-complete', refreshAfterSync);
+    return () => window.removeEventListener('adforge:sync-complete', refreshAfterSync);
+  }, [addLog, dateRange.end, dateRange.start, fetchData]);
 
   const handlePeriodChange = (period) => {
     setActivePeriod(period);
@@ -103,21 +139,16 @@ export default function Dashboard() {
     ...d,
     // Use date field for LineChart compatibility
     date: isHourly ? `${dateRange.start}T${String(d.hour).padStart(2, '0')}:00:00` : d.date,
-    prev_revenue: (d.revenue || 0) * 0.85,
-    prev_spend: (d.spend || 0) * 0.9,
-    prev_roas: (d.roas || 0) * 0.92,
-    prev_orders: (d.orders || 0) * 0.88,
-    prev_cpa: (d.cpa || 0) * 1.08,
   }));
 
   const ov = overview;
   const cpa = ov?.cost_per_order ?? (ov?.shopify_orders > 0 ? ov.total_spend / ov.shopify_orders : 0);
 
-  // Stat card change values (vs previous period would need extra API call, using fixed placeholders for now)
-  const revenueChange = ov ? ((ov.shopify_revenue > 0) ? 14.2 : null) : null;
-  const spendChange   = ov ? -8.1 : null;
-  const roasChange    = ov ? 25.4 : null;
-  const cpoChange     = ov ? -5.3 : null;
+  const revenueChange = ov?.changes?.shopify_revenue ?? null;
+  const spendChange = ov?.changes?.total_spend ?? null;
+  const roasChange = ov?.changes?.real_roas ?? null;
+  const ordersChange = ov?.changes?.shopify_orders ?? null;
+  const cpoChange = ov?.changes?.cost_per_order ?? null;
 
   const metricConfigs = {
     revenue: {
@@ -244,7 +275,7 @@ export default function Dashboard() {
             valueType="number"
             icon="📦"
             color="yellow"
-            change={null}
+            change={ordersChange}
             onClick={() => setSelectedMetric('orders')}
             isActive={selectedMetric === 'orders'}
           />

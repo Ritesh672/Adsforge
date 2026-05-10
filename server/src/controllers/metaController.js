@@ -24,6 +24,15 @@ exports.getOverview = async (req, res) => {
     const range = getDateRange(req.query);
     const dateError = validateDates(range.start, range.end);
     if (dateError) return res.status(400).json({ success: false, error: dateError });
+    const rangeStart = new Date(`${range.start}T00:00:00`);
+    const prevEndDate = new Date(rangeStart);
+    prevEndDate.setDate(prevEndDate.getDate() - 1);
+
+    const prevStartDate = new Date(prevEndDate);
+    prevStartDate.setDate(prevStartDate.getDate() - (range.days - 1));
+
+    const prevStart = prevStartDate.toISOString().split('T')[0];
+    const prevEnd = prevEndDate.toISOString().split('T')[0];
 
     // 1. Get Meta Metrics
     const metaRes = await pool.query(`
@@ -46,6 +55,21 @@ exports.getOverview = async (req, res) => {
       WHERE date >= $1 AND date <= $2
     `, [range.start, range.end]);
 
+    const prevMetaRes = await pool.query(`
+      SELECT
+        COUNT(*) as days,
+        COALESCE(SUM(total_ad_spend), 0)::FLOAT as total_spend,
+        COALESCE(SUM(impressions), 0)::INTEGER as total_impressions,
+        COALESCE(SUM(clicks), 0)::INTEGER as total_clicks,
+        COALESCE(SUM(reach), 0)::INTEGER as total_reach,
+        COALESCE(SUM(meta_purchases), 0)::INTEGER as total_meta_purchases,
+        ROUND(AVG(frequency)::numeric, 2)::FLOAT as avg_frequency,
+        COALESCE(SUM(meta_add_to_cart), 0)::INTEGER as total_meta_add_to_cart,
+        COALESCE(SUM(meta_initiate_checkout), 0)::INTEGER as total_meta_initiate_checkout
+      FROM daily_performance
+      WHERE date >= $1 AND date <= $2
+    `, [prevStart, prevEnd]);
+
     // 2. Get Shopify Ground Truth Metrics
     const shopifyRes = await pool.query(`
       SELECT
@@ -58,12 +82,32 @@ exports.getOverview = async (req, res) => {
       AND financial_status != 'voided'
     `, [range.start, range.end]);
 
+    const prevShopifyRes = await pool.query(`
+      SELECT
+        COALESCE(SUM(total_price), 0)::FLOAT as shopify_revenue,
+        COUNT(*)::INTEGER as shopify_orders,
+        COALESCE(SUM(total_items), 0)::INTEGER as shopify_units
+      FROM orders
+      WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 
+      AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
+      AND financial_status != 'voided'
+    `, [prevStart, prevEnd]);
+
     const m = metaRes.rows[0];
     const s = shopifyRes.rows[0];
+    const pm = prevMetaRes.rows[0];
+    const ps = prevShopifyRes.rows[0];
 
     // 3. Calculate Derived Metrics
     const real_roas = m.total_spend > 0 ? (s.shopify_revenue / m.total_spend) : null;
     const cost_per_order = s.shopify_orders > 0 ? (m.total_spend / s.shopify_orders) : null;
+    const avg_order_value = s.shopify_orders > 0 ? (s.shopify_revenue / s.shopify_orders) : null;
+    const prev_real_roas = pm.total_spend > 0 ? (ps.shopify_revenue / pm.total_spend) : null;
+    const prev_cost_per_order = ps.shopify_orders > 0 ? (pm.total_spend / ps.shopify_orders) : null;
+    const prev_avg_order_value = ps.shopify_orders > 0 ? (ps.shopify_revenue / ps.shopify_orders) : null;
+    const percentChange = (current, previous) => (
+      Number(previous) > 0 ? ((Number(current || 0) - Number(previous)) / Number(previous) * 100) : null
+    );
 
     res.json({
       success: true,
@@ -86,7 +130,25 @@ exports.getOverview = async (req, res) => {
         shopify_units: s.shopify_units,
         real_roas,
         cost_per_order,
-        mer: real_roas
+        avg_order_value,
+        mer: real_roas,
+        changes: {
+          total_spend: percentChange(m.total_spend, pm.total_spend),
+          total_impressions: percentChange(m.total_impressions, pm.total_impressions),
+          total_clicks: percentChange(m.total_clicks, pm.total_clicks),
+          total_landing_page_views: percentChange(m.total_clicks, pm.total_clicks),
+          total_reach: percentChange(m.total_reach, pm.total_reach),
+          avg_frequency: percentChange(m.avg_frequency, pm.avg_frequency),
+          meta_purchases: percentChange(m.total_meta_purchases, pm.total_meta_purchases),
+          meta_add_to_cart: percentChange(m.total_meta_add_to_cart, pm.total_meta_add_to_cart),
+          meta_initiate_checkout: percentChange(m.total_meta_initiate_checkout, pm.total_meta_initiate_checkout),
+          shopify_revenue: percentChange(s.shopify_revenue, ps.shopify_revenue),
+          shopify_orders: percentChange(s.shopify_orders, ps.shopify_orders),
+          shopify_units: percentChange(s.shopify_units, ps.shopify_units),
+          real_roas: percentChange(real_roas, prev_real_roas),
+          cost_per_order: percentChange(cost_per_order, prev_cost_per_order),
+          avg_order_value: percentChange(avg_order_value, prev_avg_order_value)
+        }
       },
       meta: {
         start_date: range.start,
@@ -140,7 +202,7 @@ exports.getDailyData = async (req, res) => {
         )
         SELECT
           hb.hour,
-          (COALESCE(dm.total_ad_spend, 0) / 24.0) as spend,
+          (COALESCE(dm.total_ad_spend, 0) / 24.0)::FLOAT as spend,
           COALESCE(hs.revenue, 0)::FLOAT as revenue,
           COALESCE(hs.orders, 0)::INTEGER as orders,
           COALESCE(hs.units, 0)::INTEGER as units,
@@ -229,9 +291,9 @@ exports.getDailyData = async (req, res) => {
     const daily = result.rows;
     
     // Summary
-    const totalSpend = daily.reduce((sum, r) => sum + (r.spend || 0), 0);
-    const totalRevenue = daily.reduce((sum, r) => sum + (r.revenue || 0), 0);
-    const totalOrders = daily.reduce((sum, r) => sum + (r.orders || 0), 0);
+    const totalSpend = daily.reduce((sum, r) => sum + Number(r.spend || 0), 0);
+    const totalRevenue = daily.reduce((sum, r) => sum + Number(r.revenue || 0), 0);
+    const totalOrders = daily.reduce((sum, r) => sum + Number(r.orders || 0), 0);
     
     res.json({
       success: true,

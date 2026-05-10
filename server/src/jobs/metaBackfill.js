@@ -1,7 +1,10 @@
 const pool = require('../config/db');
 const { fetchAccountDailyInsights } = require('../services/meta');
 
-const formatDate = (date) => date.toISOString().split('T')[0];
+const formatDate = (date) => {
+  const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return istDate.toISOString().split('T')[0];
+};
 
 const upsertMetaInsights = async (insights) => {
   for (let i = 0; i < insights.length; i++) {
@@ -95,9 +98,13 @@ const runMetaIncrementalSync = async () => {
 
     let startDate;
     if (lastDate) {
-      const nextDate = new Date(lastDate);
-      nextDate.setDate(nextDate.getDate() + 1);
-      startDate = formatDate(nextDate);
+      const refreshFromDate = new Date(lastDate);
+      refreshFromDate.setDate(refreshFromDate.getDate() - 1);
+      startDate = formatDate(refreshFromDate);
+
+      if (new Date(startDate) > new Date(endDate)) {
+        startDate = endDate;
+      }
     } else {
       startDate = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
     }

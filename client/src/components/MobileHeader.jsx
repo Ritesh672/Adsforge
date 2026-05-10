@@ -6,7 +6,17 @@ const navItems = [
   { path: '/products', label: 'Products', icon: <ProductsIcon /> },
 ];
 
-export default function MobileHeader({ isOpen, onOpen, onClose, syncStatus, onSyncNow }) {
+const formatLastSynced = (value) => {
+  if (!value) return 'Last synced time unavailable';
+
+  return `Last synced at ${new Date(value).toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })}`;
+};
+
+export default function MobileHeader({ isOpen, onOpen, onClose, syncStatus, lastSyncedAt, onSyncNow }) {
   const isSyncing = syncStatus === 'syncing';
 
   return (
@@ -69,7 +79,7 @@ export default function MobileHeader({ isOpen, onOpen, onClose, syncStatus, onSy
             <span className={`sync-dot ${isSyncing ? 'loading' : syncStatus === 'error' ? 'error' : 'active'}`} />
             <div>
               <strong>{isSyncing ? 'Syncing data' : syncStatus === 'error' ? 'Sync failed' : 'Data up to date'}</strong>
-              <span>Meta + Shopify</span>
+              <span>{isSyncing ? 'Meta first, Shopify may take longer' : formatLastSynced(lastSyncedAt)}</span>
             </div>
           </div>
         </div>

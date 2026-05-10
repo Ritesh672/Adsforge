@@ -141,6 +141,14 @@ export default function ProductInsightsTab({ dateRange, period }) {
   const [sortBy, setSortBy] = useState('revenue');
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const refreshAfterSync = () => setReloadKey((value) => value + 1);
+
+    window.addEventListener('adforge:sync-complete', refreshAfterSync);
+    return () => window.removeEventListener('adforge:sync-complete', refreshAfterSync);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +182,7 @@ export default function ProductInsightsTab({ dateRange, period }) {
     return () => {
       cancelled = true;
     };
-  }, [dateRange, period]);
+  }, [dateRange, period, reloadKey]);
 
   const sortedProducts = useMemo(() => {
     const sorted = [...products];
