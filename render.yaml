@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: adsforge
+    runtime: node
+    plan: free
+    buildCommand: npm run render-build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_POOL_MAX
+        value: "5"

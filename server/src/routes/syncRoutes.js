@@ -1,10 +1,11 @@
 const express = require('express');
-const { triggerBackfill, triggerIncrementalSync, getSyncStatus, handleWebhook } = require('../controllers/syncController');
+const { triggerBackfill, triggerIncrementalSync, triggerUnifiedSync, getSyncStatus, handleWebhook } = require('../controllers/syncController');
 
 const router = express.Router();
 
 router.post('/sync/backfill', triggerBackfill);
 router.post('/sync/incremental', triggerIncrementalSync);
+router.post('/sync/all', triggerUnifiedSync);
 router.get('/sync/status', getSyncStatus);
 
 router.post('/webhook/order-create', (req, res) => handleWebhook(req, res, 'order-create'));

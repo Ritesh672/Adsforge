@@ -3,70 +3,104 @@ const axios = require('axios');
 const SHOP = process.env.SHOP;
 const TOKEN = process.env.TOKEN;
 const API_VERSION = '2024-01';
-const BASE_URL = `https://${SHOP}/admin/api/${API_VERSION}`;
+
+const getISTTime = () => {
+  return new Date().toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }) + ' IST';
+};
+
+const log = (msg) => {
+  process.stdout.write(`[${getISTTime()}] [Shopify REST] ${msg}\n`);
+};
 
 const shopifyClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: `https://${SHOP}/admin/api/${API_VERSION}`,
   headers: {
     'X-Shopify-Access-Token': TOKEN,
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json'
   },
+  timeout: 30000
 });
 
-// Rate limit interceptor
-shopifyClient.interceptors.response.use(
-  response => response,
-  async error => {
-    const { config, response } = error;
-    if (response && response.status === 429) {
-      const retryAfter = parseInt(response.headers['retry-after'] || '2') * 1000;
-      console.log(`⚠️ Shopify Rate Limit hit. Waiting ${retryAfter}ms before retry...`);
-      await new Promise(resolve => setTimeout(resolve, retryAfter));
-      return shopifyClient(config);
-    }
-    return Promise.reject(error);
-  }
-);
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchWithPagination(url) {
-  let allData = [];
-  let nextUrl = url;
+function getNextPageUrl(linkHeader) {
+  if (!linkHeader) return null;
 
-  while (nextUrl) {
-    console.log(`Fetching page: ${nextUrl}`);
-    const response = await shopifyClient.get(nextUrl);
-    
-    const dataKey = Object.keys(response.data)[0];
-    const pageData = response.data[dataKey];
-    allData = allData.concat(pageData);
-    console.log(`Got ${pageData.length} records, total so far: ${allData.length}`);
+  const links = linkHeader.split(',');
+  const nextLink = links.find(link => link.includes('rel="next"'));
+  if (!nextLink) return null;
 
-    const linkHeader = response.headers['link'];
-    nextUrl = null;
+  const match = nextLink.match(/<([^>]+)>/);
+  return match ? match[1] : null;
+}
 
-    if (linkHeader) {
-      const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-      if (match) {
-        const fullUrl = match[1];
-        const parts = fullUrl.split(`/admin/api/${API_VERSION}`);
-        if (parts[1]) {
-          nextUrl = parts[1];
-        }
+async function requestWithRetry(url, retries = 3) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await shopifyClient.get(url);
+    } catch (error) {
+      lastError = error;
+
+      if (error.response?.status === 401) {
+        throw new Error('Unauthorized: Please check your Shopify token in .env');
       }
+
+      const isRetryable =
+        error.response?.status === 429 ||
+        error.response?.status >= 500 ||
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT' ||
+        String(error.message || '').toLowerCase().includes('timeout');
+
+      if (!isRetryable || attempt === retries) break;
+
+      const retryAfter = Number(error.response?.headers?.['retry-after']);
+      const waitMs = retryAfter ? retryAfter * 1000 : 500 * attempt;
+      log(`Retrying Shopify request after ${waitMs}ms: ${error.message}`);
+      await delay(waitMs);
     }
   }
 
-  return allData;
+  throw lastError;
+}
+
+async function fetchWithPagination(initialUrl, resourceKey) {
+  let url = initialUrl;
+  const records = [];
+
+  while (url) {
+    const response = await requestWithRetry(url);
+    const batch = response.data?.[resourceKey] || [];
+    records.push(...batch);
+    log(`Received ${batch.length} ${resourceKey} (Total: ${records.length})`);
+
+    url = getNextPageUrl(response.headers.link);
+    if (url) {
+      const parsed = new URL(url);
+      url = `${parsed.pathname}${parsed.search}`.replace(`/admin/api/${API_VERSION}`, '');
+      await delay(250);
+    }
+  }
+
+  return records;
 }
 
 const fetchAllProducts = async () => {
-  console.log('Fetching all products from Shopify...');
-  return await fetchWithPagination('/products.json?limit=250');
+  log('Fetching products...');
+  return fetchWithPagination('/products.json?limit=250', 'products');
 };
 
 const fetchAllOrders = async (daysBack = 365, sinceDate = null) => {
   let createdAtMin;
-  
+
   if (sinceDate) {
     createdAtMin = new Date(sinceDate).toISOString();
   } else {
@@ -74,25 +108,22 @@ const fetchAllOrders = async (daysBack = 365, sinceDate = null) => {
     date.setDate(date.getDate() - daysBack);
     createdAtMin = date.toISOString();
   }
-  
-  console.log(`Fetching orders since ${createdAtMin} (Oldest First)...`);
-  return await fetchWithPagination(`/orders.json?status=any&limit=250&created_at_min=${createdAtMin}&order=created_at+asc`);
+
+  log(`Fetching orders since ${createdAtMin}...`);
+  const params = new URLSearchParams({
+    status: 'any',
+    limit: '250',
+    created_at_min: createdAtMin,
+    order: 'created_at asc'
+  });
+
+  return fetchWithPagination(`/orders.json?${params.toString()}`, 'orders');
 };
 
-const fetchAllRefunds = async (orderId, retries = 3) => {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await shopifyClient.get(`/orders/${orderId}/refunds.json`);
-      return response.data.refunds;
-    } catch (err) {
-      if (i === retries - 1) {
-        console.error(`✗ All ${retries} attempts failed for order ${orderId}`);
-        throw err;
-      }
-      console.log(`Retrying order ${orderId}, attempt ${i + 1}`);
-      await new Promise(r => setTimeout(r, 1000));
-    }
-  }
+const fetchAllRefunds = async (orderId) => {
+  log(`Fetching refunds for order ${orderId}...`);
+  const response = await requestWithRetry(`/orders/${orderId}/refunds.json`);
+  return response.data?.refunds || [];
 };
 
 module.exports = {

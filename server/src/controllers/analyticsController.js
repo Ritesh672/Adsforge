@@ -9,10 +9,22 @@ exports.getTopPerformers = async (req, res) => {
 
   try {
     const range = getDateRange(req.query);
+    const rangeStart = new Date(`${range.start}T00:00:00`);
+    const prevEndDate = new Date(rangeStart);
+    prevEndDate.setDate(prevEndDate.getDate() - 1);
+
+    const prevStartDate = new Date(prevEndDate);
+    prevStartDate.setDate(prevStartDate.getDate() - (range.days - 1));
+
+    const prevStart = prevStartDate.toISOString().split('T')[0];
+    const prevEnd = prevEndDate.toISOString().split('T')[0];
+    const sqlParams = [...range.params, prevStart, prevEnd];
+    const prevStartIndex = sqlParams.length - 1;
+    const prevEndIndex = sqlParams.length;
 
     let query = `
       SELECT 
-        p.id as product_id, p.title, p.image_url,
+        p.id as product_id, p.title, p.vendor, p.status, p.image_url,
         COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as period_revenue,
         COALESCE(SUM(oli.quantity), 0)::INTEGER as period_units,
         (
@@ -20,8 +32,8 @@ exports.getTopPerformers = async (req, res) => {
           FROM order_line_items oli2
           JOIN orders o2 ON oli2.order_id = o2.id
           WHERE oli2.product_id = p.id 
-            AND o2.ordered_at::date >= $2::DATE - ($3::INTEGER || ' days')::INTERVAL
-            AND o2.ordered_at::date < $2::DATE
+            AND o2.ordered_at::date >= $${prevStartIndex}::DATE
+            AND o2.ordered_at::date <= $${prevEndIndex}::DATE
         ) as prev_period_revenue
       FROM products p
       JOIN order_line_items oli ON p.id = oli.product_id
@@ -29,8 +41,6 @@ exports.getTopPerformers = async (req, res) => {
       WHERE o.${range.sqlFilterAlt}
       GROUP BY p.id
     `;
-
-    const sqlParams = [...range.params, range.days];
 
     if (by === 'revenue') {
       query += ` ORDER BY period_revenue DESC LIMIT $${sqlParams.length + 1}`;
@@ -47,7 +57,7 @@ exports.getTopPerformers = async (req, res) => {
       `;
     }
 
-    const result = await pool.query(query, [...sqlParams, limit]);
+    const result = await pool.query(query, [...sqlParams, parseInt(limit) || 10]);
     const data = result.rows.map((row, index) => ({
       rank: index + 1,
       ...row,
@@ -200,33 +210,62 @@ exports.getSizeIntelligence = async (req, res) => {
 exports.getReturns = async (req, res) => {
   try {
     const range = getDateRange(req.query);
+    const shiftSqlParams = (filter, offset) => filter.replace(/\$(\d+)/g, (_, index) => `$${Number(index) + offset}`);
+    const shiftedCreatedAtFilter = shiftSqlParams(range.sqlFilterCreatedAt, range.params.length);
 
     const summaryRes = await pool.query(`
       SELECT 
         COUNT(*)::INTEGER as total_returns,
         COALESCE(SUM(refund_amount), 0)::FLOAT as total_refund_amount,
-        COALESCE(AVG(refund_amount), 0)::FLOAT as avg_refund_amount,
-        (
-          SELECT (COUNT(*)::FLOAT / NULLIF((SELECT COUNT(*) FROM orders WHERE ${range.sqlFilterAlt.replace('$1', '$2').replace('$2', '$3')}), 0)::FLOAT * 100)
-          FROM returns WHERE ${range.sqlFilterCreatedAt.replace('$1', '$2').replace('$2', '$3')}
-        )::FLOAT as overall_return_rate
+        COALESCE(AVG(refund_amount), 0)::FLOAT as avg_refund_amount
       FROM returns
       WHERE ${range.sqlFilterCreatedAt}
     `, range.params);
 
+    const ordersRes = await pool.query(`
+      SELECT COUNT(*)::INTEGER as total_orders
+      FROM orders
+      WHERE ${range.sqlFilterAlt}
+    `, range.params);
+
+    const summary = summaryRes.rows[0] || {};
+    const totalOrders = ordersRes.rows[0]?.total_orders || 0;
+    summary.overall_return_rate = totalOrders > 0
+      ? (summary.total_returns / totalOrders) * 100
+      : 0;
+
     const byProductRes = await pool.query(`
+      WITH orders_by_product AS (
+        SELECT 
+          oli.product_id,
+          COUNT(DISTINCT o.id)::INTEGER as total_orders
+        FROM order_line_items oli
+        JOIN orders o ON oli.order_id = o.id
+        WHERE o.${range.sqlFilterAlt}
+        GROUP BY oli.product_id
+      ),
+      returns_by_product AS (
+        SELECT
+          product_id,
+          COUNT(*)::INTEGER as return_count,
+          COALESCE(AVG(refund_amount), 0)::FLOAT as avg_refund_amount,
+          COALESCE(SUM(refund_amount), 0)::FLOAT as revenue_lost
+        FROM returns
+        WHERE ${shiftedCreatedAtFilter}
+        GROUP BY product_id
+      )
       SELECT 
-        p.id as product_id, p.title, p.image_url,
-        COUNT(DISTINCT o.id)::INTEGER as total_orders,
-        COUNT(r.id)::INTEGER as total_returns,
-        (COUNT(r.id)::FLOAT / NULLIF(COUNT(DISTINCT o.id), 0)::FLOAT * 100)::FLOAT as return_rate,
-        COALESCE(AVG(r.refund_amount), 0)::FLOAT as avg_refund_amount
+        p.id, p.id as product_id, p.title, p.image_url,
+        COALESCE(obp.total_orders, 0)::INTEGER as total_orders,
+        COALESCE(rbp.return_count, 0)::INTEGER as total_returns,
+        COALESCE(rbp.return_count, 0)::INTEGER as return_count,
+        (COALESCE(rbp.return_count, 0)::FLOAT / NULLIF(COALESCE(obp.total_orders, 0), 0)::FLOAT * 100)::FLOAT as return_rate,
+        COALESCE(rbp.avg_refund_amount, 0)::FLOAT as avg_refund_amount,
+        COALESCE(rbp.revenue_lost, 0)::FLOAT as revenue_lost
       FROM products p
-      LEFT JOIN order_line_items oli ON p.id = oli.product_id
-      LEFT JOIN orders o ON oli.order_id = o.id AND o.${range.sqlFilterAlt}
-      LEFT JOIN returns r ON p.id = r.product_id AND r.${range.sqlFilterCreatedAt.replace('$1', '$3').replace('$2', '$4')}
-      GROUP BY p.id
-      ORDER BY return_rate DESC NULLS LAST
+      LEFT JOIN orders_by_product obp ON p.id = obp.product_id
+      LEFT JOIN returns_by_product rbp ON p.id = rbp.product_id
+      ORDER BY return_count DESC, return_rate DESC NULLS LAST
       LIMIT 20
     `, [...range.params, ...range.params]);
 
@@ -251,8 +290,14 @@ exports.getReturns = async (req, res) => {
     res.json({
       success: true,
       data: {
-        summary: summaryRes.rows[0],
+        summary,
+        stats: {
+          total_returns: summary.total_returns || 0,
+          revenue_lost: summary.total_refund_amount || 0,
+          overall_rate: summary.overall_return_rate || 0
+        },
         by_product: byProductRes.rows,
+        top_returned_products: byProductRes.rows,
         by_reason: byReasonRes.rows,
         by_type: byTypeRes.rows
       },

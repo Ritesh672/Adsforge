@@ -4,8 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "migrate": "node src/migrations/runMigrations.js",
+    "sync:shopify": "node src/scripts/syncShopify.js",
+    "sync:shopify:incremental": "node src/scripts/syncShopifyIncremental.js",
+    "sync:refunds": "node src/scripts/syncRefunds.js",
+    "sync:meta": "node src/scripts/syncMeta.js"
   },
   "keywords": [],
   "author": "",

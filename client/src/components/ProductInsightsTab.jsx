@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTopPerformers, getTopProducts } from '../api';
+import { getTopProducts } from '../api';
 import { fmt } from './StatCard';
 
 const sortOptions = [
@@ -15,9 +15,8 @@ const productKey = (product) => product.id ?? product.product_id;
 const imageFallback =
   'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="760" viewBox="0 0 640 760"><rect width="640" height="760" fill="%23111118"/><rect x="130" y="150" width="380" height="460" rx="42" fill="%231c1c28"/><circle cx="320" cy="314" r="76" fill="%232a2a3e"/><path d="M206 560c33-82 89-124 169-124s136 42 169 124" fill="%232a2a3e"/><path d="M0 0h640v760H0z" fill="none" stroke="%236c63ff" stroke-opacity=".24" stroke-width="4"/></svg>';
 
-const normalizeProduct = (product, growthMap) => {
+const normalizeProduct = (product) => {
   const id = productKey(product);
-  const growth = growthMap.get(id);
   return {
     id,
     title: product.title || 'Untitled product',
@@ -28,7 +27,7 @@ const normalizeProduct = (product, growthMap) => {
     units: Number(product.total_units ?? product.period_units ?? 0),
     orders: Number(product.order_count ?? 0),
     returns: Number(product.return_count ?? 0),
-    growth: Number(growth?.vs_previous_period_pct ?? product.mom_revenue_change_pct ?? 0),
+    growth: Number(product.mom_revenue_change_pct ?? product.vs_previous_period_pct ?? 0),
   };
 };
 
@@ -141,7 +140,6 @@ export default function ProductInsightsTab({ dateRange, period }) {
   const navigate = useNavigate();
   const [sortBy, setSortBy] = useState('revenue');
   const [products, setProducts] = useState([]);
-  const [topPerformers, setTopPerformers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -154,24 +152,17 @@ export default function ProductInsightsTab({ dateRange, period }) {
         : { period };
 
       try {
-        const [productsRes, performersRes] = await Promise.all([
-          getTopProducts({ ...rangeParams, sort: sortBy === 'units' ? 'units' : 'revenue', limit: 120 }),
-          getTopPerformers({ ...rangeParams, by: sortBy === 'units' ? 'units' : 'revenue', limit: 120 }),
-        ]);
+        const productsResult = await getTopProducts({ ...rangeParams, sort: 'revenue', limit: 48 });
 
         if (cancelled) return;
 
-        const performerRows = performersRes.data || [];
-        const growthMap = new Map(performerRows.map((item) => [productKey(item), item]));
-        const normalized = (productsRes.data || []).map((product) => normalizeProduct(product, growthMap));
+        const normalized = (productsResult.data || []).map((product) => normalizeProduct(product));
 
         setProducts(normalized);
-        setTopPerformers(performerRows.map((product) => normalizeProduct(product, growthMap)).slice(0, 4));
       } catch (error) {
         console.error(error);
         if (!cancelled) {
           setProducts([]);
-          setTopPerformers([]);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -183,7 +174,7 @@ export default function ProductInsightsTab({ dateRange, period }) {
     return () => {
       cancelled = true;
     };
-  }, [dateRange, period, sortBy]);
+  }, [dateRange, period]);
 
   const sortedProducts = useMemo(() => {
     const sorted = [...products];
@@ -195,6 +186,8 @@ export default function ProductInsightsTab({ dateRange, period }) {
 
     return sorted;
   }, [products, sortBy]);
+
+  const topPerformers = useMemo(() => sortedProducts.slice(0, 4), [sortedProducts]);
 
   const openProduct = (id) => {
     if (id) navigate(`/products/${id}`);

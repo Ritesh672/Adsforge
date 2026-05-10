@@ -37,17 +37,6 @@ exports.getDateRange = (query) => {
     };
   }
 
-  // Fallback to period
-  const periodMap = {
-    'today': '0 days',
-    'yesterday': '1 day',
-    '7d': '7 days',
-    '30d': '30 days',
-    '90d': '90 days',
-    '1y': '1 year'
-  };
-  const interval = periodMap[query.period] || '30 days';
-  
   // Calculate start/end for period mode to include in meta
   const today = new Date();
   const offset = 5.5 * 60 * 60 * 1000; // IST Offset
@@ -66,12 +55,16 @@ exports.getDateRange = (query) => {
     start = startObj.toISOString().split('T')[0];
     end = endObj.toISOString().split('T')[0];
   } else {
-    end = localToday.toISOString().split('T')[0];
-    if (query.period === '7d') startObj.setDate(startObj.getDate() - 7);
-    else if (query.period === '90d') startObj.setDate(startObj.getDate() - 90);
-    else if (query.period === '1y') startObj.setFullYear(startObj.getFullYear() - 1);
-    else startObj.setDate(startObj.getDate() - 30); // default 30d
+    const daysMap = { '7d': 7, '30d': 30, '90d': 90, '1y': 365 };
+    const days = daysMap[query.period] || 30;
+
+    // Rolling periods use completed days only: last 7d means yesterday and the 6 days before it.
+    endObj.setDate(endObj.getDate() - 1);
+    startObj.setTime(endObj.getTime());
+    startObj.setDate(endObj.getDate() - (days - 1));
+
     start = startObj.toISOString().split('T')[0];
+    end = endObj.toISOString().split('T')[0];
   }
 
   const diffTime = Math.abs(new Date(end) - new Date(start));
@@ -80,13 +73,12 @@ exports.getDateRange = (query) => {
   return {
     mode: 'period',
     period: query.period || '30d',
-    interval,
     start,
     end,
-    days: Math.max(1, diffDays),
-    sqlFilter: `date >= CURRENT_DATE - $1::interval`,
-    sqlFilterAlt: `ordered_at >= CURRENT_DATE - $1::interval`,
-    sqlFilterCreatedAt: `created_at >= CURRENT_DATE - $1::interval`,
-    params: [interval]
+    days: Math.max(1, diffDays + 1),
+    sqlFilter: `date >= $1 AND date <= $2`,
+    sqlFilterAlt: `ordered_at::date >= $1 AND ordered_at::date <= $2`,
+    sqlFilterCreatedAt: `created_at::date >= $1 AND created_at::date <= $2`,
+    params: [start, end]
   };
 };

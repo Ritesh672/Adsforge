@@ -4,7 +4,7 @@ import StatCard, { fmt } from '../components/StatCard';
 import LineChart from '../components/LineChart';
 import TopProducts from '../components/TopProducts';
 import SyncLog from '../components/SyncLog';
-import { getMetaOverview, getMetaDaily, getTopProducts, triggerMetaSync, triggerShopifySync } from '../api';
+import { getMetaOverview, getMetaDaily, getTopProducts } from '../api';
 
 const getLocalDate = (daysOffset = 0) => {
   const d = new Date();
@@ -15,47 +15,25 @@ const getLocalDate = (daysOffset = 0) => {
   return `${year}-${month}-${day}`;
 };
 
-export default function Dashboard({ onSyncStatus }) {
+const getCompletedPeriodRange = (days) => ({
+  start: getLocalDate(-days),
+  end: getLocalDate(-1),
+});
+
+export default function Dashboard() {
   const [activePeriod, setActivePeriod] = useState('30d');
-  const [dateRange, setDateRange] = useState({ 
-    start: getLocalDate(-30), 
-    end: getLocalDate() 
-  });
+  const [dateRange, setDateRange] = useState(getCompletedPeriodRange(30));
   const [overview, setOverview] = useState(null);
   const [dailyData, setDailyData] = useState(null);
   const [daily, setDaily] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncLogs, setSyncLogs] = useState([]);
+  const [selectedMetric, setSelectedMetric] = useState('revenue');
 
   const addLog = useCallback((type, message) => {
     const time = new Date().toLocaleTimeString('en-IN');
     setSyncLogs(prev => [{ type, message, time }, ...prev].slice(0, 20));
-  }, []);
-
-  // Trigger sync on mount
-  useEffect(() => {
-    const runSync = async () => {
-      onSyncStatus?.('syncing');
-      addLog('info', 'Triggering Meta Ads sync...');
-      try {
-        await triggerMetaSync();
-        addLog('success', 'Meta sync started in background');
-      } catch (e) {
-        addLog('error', `Meta sync failed: ${e.message}`);
-      }
-
-      addLog('info', 'Triggering Incremental Shopify sync...');
-      try {
-        await triggerShopifySync();
-        addLog('success', 'Incremental sync started in background');
-        onSyncStatus?.('done');
-      } catch (e) {
-        addLog('error', `Incremental sync failed: ${e.message}`);
-        onSyncStatus?.('error');
-      }
-    };
-    runSync();
   }, []);
 
   // Fetch data whenever date range changes
@@ -78,6 +56,8 @@ export default function Dashboard({ onSyncStatus }) {
         revenue: r.revenue,
         spend: r.spend,
         roas: r.real_roas,
+        cpa: r.cost_per_order ?? (r.orders > 0 ? r.spend / r.orders : 0),
+        orders: r.orders,
       }));
       setDaily(chartRows);
       setProducts(prods.data || []);
@@ -90,14 +70,12 @@ export default function Dashboard({ onSyncStatus }) {
 
   useEffect(() => {
     const params = { start_date: dateRange.start, end_date: dateRange.end };
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData(params);
   }, [dateRange, fetchData]);
 
   const handlePeriodChange = (period) => {
     setActivePeriod(period);
-    const end = new Date();
-    const start = new Date();
-
     if (period === 'today') {
       const todayStr = getLocalDate();
       setDateRange({ start: todayStr, end: todayStr });
@@ -110,12 +88,7 @@ export default function Dashboard({ onSyncStatus }) {
     }
 
     const daysMap = { '7d': 7, '30d': 30, '90d': 90, '1y': 365 };
-    const startStr = getLocalDate(-(daysMap[period] || 30));
-    const endStr = getLocalDate();
-    setDateRange({
-      start: startStr,
-      end: endStr,
-    });
+    setDateRange(getCompletedPeriodRange(daysMap[period] || 30));
   };
 
   const handleDateChange = (newRange) => {
@@ -126,21 +99,99 @@ export default function Dashboard({ onSyncStatus }) {
   // Process data for charts
   const isHourly = dailyData?.is_hourly;
   
-  const chartData = daily.map((d, i) => ({
+  const chartData = daily.map((d) => ({
     ...d,
     // Use date field for LineChart compatibility
     date: isHourly ? `${dateRange.start}T${String(d.hour).padStart(2, '0')}:00:00` : d.date,
     prev_revenue: (d.revenue || 0) * 0.85,
     prev_spend: (d.spend || 0) * 0.9,
+    prev_roas: (d.roas || 0) * 0.92,
+    prev_orders: (d.orders || 0) * 0.88,
+    prev_cpa: (d.cpa || 0) * 1.08,
   }));
 
   const ov = overview;
+  const cpa = ov?.cost_per_order ?? (ov?.shopify_orders > 0 ? ov.total_spend / ov.shopify_orders : 0);
 
   // Stat card change values (vs previous period would need extra API call, using fixed placeholders for now)
   const revenueChange = ov ? ((ov.shopify_revenue > 0) ? 14.2 : null) : null;
   const spendChange   = ov ? -8.1 : null;
   const roasChange    = ov ? 25.4 : null;
   const cpoChange     = ov ? -5.3 : null;
+
+  const metricConfigs = {
+    revenue: {
+      title: 'Revenue Over Time',
+      subtitle: isHourly ? 'Hourly revenue distribution' : 'Daily Shopify revenue (ground truth)',
+      currentKey: 'revenue',
+      previousKey: 'prev_revenue',
+      currentName: 'Revenue',
+      currentColor: '#00d4a0',
+      valueType: 'currency',
+      statItems: [
+        { label: 'Total Revenue', value: loading ? '...' : fmt(ov?.shopify_revenue), sub: `${ov?.shopify_orders?.toLocaleString('en-IN') || 0} orders` },
+        { label: isHourly ? 'Avg Hourly Revenue' : 'Avg Daily Revenue', value: loading || !daily.length ? '...' : fmt((ov?.shopify_revenue || 0) / Math.max(daily.length, 1)) },
+        { label: 'Avg Order Value', value: loading ? '...' : fmt(ov?.shopify_revenue && ov?.shopify_orders ? ov.shopify_revenue / ov.shopify_orders : 0) },
+      ],
+    },
+    spend: {
+      title: 'Meta Spend Over Time',
+      subtitle: isHourly ? 'Hourly ad spend (distributed)' : 'Daily Meta Ads spend',
+      currentKey: 'spend',
+      previousKey: 'prev_spend',
+      currentName: 'Meta Spend',
+      currentColor: '#6c63ff',
+      valueType: 'currency',
+      statItems: [
+        { label: 'Total Spend', value: loading ? '...' : fmt(ov?.total_spend), sub: `${ov?.total_impressions?.toLocaleString('en-IN') || 0} impressions` },
+        { label: isHourly ? 'Avg Hourly Spend' : 'Avg Daily Spend', value: loading ? '...' : fmt(ov?.avg_daily_spend) },
+        { label: 'Avg CTR', value: loading ? '...' : `${(ov?.avg_ctr || 0).toFixed(2)}%` },
+      ],
+    },
+    roas: {
+      title: 'ROAS Over Time',
+      subtitle: isHourly ? 'Hourly return on ad spend' : 'Daily revenue divided by Meta spend',
+      currentKey: 'roas',
+      previousKey: 'prev_roas',
+      currentName: 'ROAS',
+      currentColor: '#4cc9f0',
+      valueType: 'mult',
+      statItems: [
+        { label: 'Overall ROAS', value: loading ? '...' : fmt(ov?.real_roas, 'mult') },
+        { label: 'Revenue', value: loading ? '...' : fmt(ov?.shopify_revenue) },
+        { label: 'Spend', value: loading ? '...' : fmt(ov?.total_spend) },
+      ],
+    },
+    orders: {
+      title: 'Orders Over Time',
+      subtitle: isHourly ? 'Hourly order volume' : 'Daily Shopify orders',
+      currentKey: 'orders',
+      previousKey: 'prev_orders',
+      currentName: 'Orders',
+      currentColor: '#ffd166',
+      valueType: 'number',
+      statItems: [
+        { label: 'Total Orders', value: loading ? '...' : fmt(ov?.shopify_orders, 'number') },
+        { label: isHourly ? 'Avg Hourly Orders' : 'Avg Daily Orders', value: loading || !daily.length ? '...' : fmt((ov?.shopify_orders || 0) / Math.max(daily.length, 1), 'number') },
+        { label: 'Units Sold', value: loading ? '...' : fmt(ov?.shopify_units, 'number') },
+      ],
+    },
+    cpa: {
+      title: 'CPA Over Time',
+      subtitle: isHourly ? 'Hourly cost per order' : 'Daily Meta spend divided by Shopify orders',
+      currentKey: 'cpa',
+      previousKey: 'prev_cpa',
+      currentName: 'CPA',
+      currentColor: '#ff4d6d',
+      valueType: 'currency',
+      statItems: [
+        { label: 'Overall CPA', value: loading ? '...' : fmt(cpa) },
+        { label: 'Spend', value: loading ? '...' : fmt(ov?.total_spend) },
+        { label: 'Orders', value: loading ? '...' : fmt(ov?.shopify_orders, 'number') },
+      ],
+    },
+  };
+  const selectedMetricConfig = metricConfigs[selectedMetric];
 
   return (
     <>
@@ -156,7 +207,7 @@ export default function Dashboard({ onSyncStatus }) {
       <div className="page-content">
 
         {/* ─── Stat Cards ─── */}
-        <div className="stats-grid">
+        <div className="stats-grid dashboard-stats-grid">
           <StatCard
             label="Total Revenue"
             value={loading ? null : ov?.shopify_revenue}
@@ -164,6 +215,8 @@ export default function Dashboard({ onSyncStatus }) {
             icon="💰"
             color="green"
             change={revenueChange}
+            onClick={() => setSelectedMetric('revenue')}
+            isActive={selectedMetric === 'revenue'}
           />
           <StatCard
             label="Total Meta Spend"
@@ -172,6 +225,8 @@ export default function Dashboard({ onSyncStatus }) {
             icon="📡"
             color="purple"
             change={spendChange}
+            onClick={() => setSelectedMetric('spend')}
+            isActive={selectedMetric === 'spend'}
           />
           <StatCard
             label="Overall ROAS"
@@ -180,6 +235,8 @@ export default function Dashboard({ onSyncStatus }) {
             icon="📈"
             color="blue"
             change={roasChange}
+            onClick={() => setSelectedMetric('roas')}
+            isActive={selectedMetric === 'roas'}
           />
           <StatCard
             label="Total Orders"
@@ -188,42 +245,37 @@ export default function Dashboard({ onSyncStatus }) {
             icon="📦"
             color="yellow"
             change={null}
+            onClick={() => setSelectedMetric('orders')}
+            isActive={selectedMetric === 'orders'}
+          />
+          <StatCard
+            label="CPA"
+            value={loading ? null : cpa}
+            valueType="currency"
+            icon="C"
+            color="red"
+            change={cpoChange}
+            onClick={() => setSelectedMetric('cpa')}
+            isActive={selectedMetric === 'cpa'}
           />
         </div>
 
         {/* ─── Charts ─── */}
         <div className="charts-row mt-6">
-          {/* Revenue Chart */}
+          {/* Dynamic KPI Chart */}
           <LineChart
-            title="Revenue Over Time"
-            subtitle={isHourly ? "Hourly revenue distribution" : "Daily Shopify revenue (ground truth)"}
+            title={selectedMetricConfig.title}
+            subtitle={selectedMetricConfig.subtitle}
             data={chartData}
-            currentKey="revenue"
-            previousKey="prev_revenue"
-            currentName="Revenue"
+            currentKey={selectedMetricConfig.currentKey}
+            previousKey={selectedMetricConfig.previousKey}
+            currentName={selectedMetricConfig.currentName}
             previousName="Prev Period"
-            currentColor="#00d4a0"
+            currentColor={selectedMetricConfig.currentColor}
             previousColor="#334455"
-            valueType="currency"
+            valueType={selectedMetricConfig.valueType}
             loading={loading}
-            statItems={[
-              {
-                label: 'Total Revenue',
-                value: loading ? '...' : fmt(ov?.shopify_revenue),
-                sub: `${ov?.shopify_orders?.toLocaleString('en-IN') || 0} orders`,
-              },
-              {
-                label: isHourly ? 'Avg Hourly Revenue' : 'Avg Daily Revenue',
-                value: loading || !daily.length ? '...' :
-                  fmt((ov?.shopify_revenue || 0) / Math.max(daily.length, 1)),
-              },
-              {
-                label: 'Avg Order Value',
-                value: loading ? '...' :
-                  fmt(ov?.shopify_revenue && ov?.shopify_orders
-                    ? ov.shopify_revenue / ov.shopify_orders : 0),
-              },
-            ]}
+            statItems={selectedMetricConfig.statItems}
           />
 
           {/* Spend Chart */}

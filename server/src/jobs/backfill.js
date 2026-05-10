@@ -1,8 +1,60 @@
-const pLimit = require('p-limit');
 const pool = require('../config/db');
 const { fetchAllProducts, fetchAllOrders, fetchAllRefunds } = require('../services/shopify');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const REFUND_SYNC_DAYS = parseInt(process.env.REFUND_SYNC_DAYS || '365', 10);
+
+// Helper for IST Timestamp
+const getISTTime = () => {
+  return new Date().toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }) + " IST";
+};
+
+const log = (msg) => {
+  process.stdout.write(`[${getISTTime()}] ${msg}\n`);
+};
+
+const isTransientDbError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('connection terminated') ||
+    message.includes('connection timeout') ||
+    message.includes('timeout') ||
+    message.includes('econnreset') ||
+    message.includes('terminating connection') ||
+    message.includes('client has encountered a connection error')
+  );
+};
+
+const queryWithRetry = async (text, params = [], retries = 4) => {
+  let lastError;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await pool.query(text, params);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDbError(error) || attempt === retries) break;
+
+      const waitMs = 500 * attempt;
+      log(`DB retry ${attempt}/${retries} after transient error: ${error.message}`);
+      await delay(waitMs);
+    }
+  }
+
+  throw lastError;
+};
+
+const getRefundRowId = (refund, refundLineItem) => {
+  return (refund.refund_line_items || []).length > 1
+    ? (refundLineItem?.id || refund.id)
+    : refund.id;
+};
 
 const runBackfill = async () => {
   const syncLogId = await startSyncLog('backfill');
@@ -13,15 +65,15 @@ const runBackfill = async () => {
   let recordsFailed = 0;
 
   try {
-    process.stdout.write('\n================================================\n');
-    process.stdout.write('🚀 Starting Shopify Backfill Migration\n');
-    process.stdout.write('================================================\n\n');
+    log('================================================');
+    log('🚀 STARTING SHOPIFY BACKFILL MIGRATION');
+    log('================================================');
 
-    // 1. Sync Products and Variants (Sequential)
-    process.stdout.write('📦 Step 1: Fetching Products...\n');
+    // 1. Sync Products and Variants
+    log('📦 STEP 1: Fetching all products from Shopify...');
     const products = await fetchAllProducts();
     const totalProducts = products.length;
-    process.stdout.write(`✅ Found ${totalProducts} products to sync.\n`);
+    log(`✅ Found ${totalProducts} products. Starting database sync...`);
 
     for (let i = 0; i < totalProducts; i++) {
       const product = products[i];
@@ -64,26 +116,24 @@ const runBackfill = async () => {
           );
         }
         productsSynced++;
+        if (productsSynced % 50 === 0) log(`[Progress] Synced ${productsSynced}/${totalProducts} products`);
       } catch (err) {
-        process.stdout.write(`✗ Failed product ${product.id}: ${err.message}\n`);
+        log(`✗ FAILED Product ${product.id}: ${err.message}`);
         recordsFailed++;
       }
     }
-    process.stdout.write(`✅ Step 1 Complete: ${productsSynced} products synced.\n`);
+    log(`✅ Step 1 Complete: ${productsSynced} products synced.`);
 
-    // 2. Sync Orders and Line Items (Sequential)
-    process.stdout.write('\n🧾 Step 2: Fetching Orders (Last 12 Months)...\n');
+    // 2. Sync Orders and Line Items
+    log('\n🧾 STEP 2: Fetching Orders (Last 12 Months)...');
     const orders = await fetchAllOrders(365);
     const totalOrders = orders.length;
-    process.stdout.write(`✅ Found ${totalOrders} orders to sync.\n`);
+    log(`✅ Found ${totalOrders} orders. Starting database sync...`);
 
     for (let i = 0; i < totalOrders; i++) {
       const order = orders[i];
       try {
-        const fulfilledAt = order.fulfillments && order.fulfillments.length > 0 
-          ? order.fulfillments[0].created_at 
-          : null;
-
+        const fulfilledAt = order.fulfillments && order.fulfillments.length > 0 ? order.fulfillments[0].created_at : null;
         const totalItems = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
 
         const orderResult = await pool.query(
@@ -101,120 +151,73 @@ const runBackfill = async () => {
 
         const dbOrderId = orderResult.rows[0].id;
 
+        // Process Line Items
         for (const item of order.line_items) {
           const productRef = await pool.query('SELECT id FROM products WHERE shopify_product_id = $1', [item.product_id]);
           const variantRef = await pool.query('SELECT id FROM variants WHERE shopify_variant_id = $1', [item.variant_id]);
-          
-          const dbProdId = productRef.rows[0]?.id || null;
-          const dbVarId = variantRef.rows[0]?.id || null;
           const { size, color } = parseVariantTitle(item.variant_title);
-
-          const discountAmount = item.discount_allocations 
-            ? item.discount_allocations.reduce((sum, d) => sum + parseFloat(d.amount), 0)
-            : 0;
+          const discountAmount = item.discount_allocations ? item.discount_allocations.reduce((sum, d) => parseFloat(sum) + parseFloat(d.amount), 0) : 0;
 
           await pool.query(
             `INSERT INTO order_line_items (shopify_line_item_id, order_id, product_id, variant_id, title, variant_title, quantity, price, discount_amount, size, color)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (shopify_line_item_id) DO UPDATE SET
-                quantity = EXCLUDED.quantity,
-                price = EXCLUDED.price,
-                discount_amount = EXCLUDED.discount_amount,
-                size = EXCLUDED.size,
-                color = EXCLUDED.color`,
-            [item.id, dbOrderId, dbProdId, dbVarId, item.title, item.variant_title, item.quantity, item.price, discountAmount, size, color]
+                quantity = EXCLUDED.quantity, price = EXCLUDED.price, discount_amount = EXCLUDED.discount_amount, size = EXCLUDED.size, color = EXCLUDED.color`,
+            [item.id, dbOrderId, productRef.rows[0]?.id || null, variantRef.rows[0]?.id || null, item.title, item.variant_title, item.quantity, item.price, discountAmount, size, color]
           );
           lineItemsSynced++;
         }
 
+        // Process refunds through the Shopify REST refunds endpoint.
+        const refunds = await fetchAllRefunds(order.id);
+        for (const refund of refunds) {
+          const refundAmount = refund.transactions ? refund.transactions.reduce((sum, t) => parseFloat(sum) + parseFloat(t.amount), 0) : 0;
+          for (const rItem of refund.refund_line_items || []) {
+            const lineItem = rItem.line_item || {};
+            const productRef = await pool.query('SELECT id FROM products WHERE shopify_product_id = $1', [lineItem.product_id]);
+            const variantRef = await pool.query('SELECT id FROM variants WHERE shopify_variant_id = $1', [lineItem.variant_id]);
+
+            let returnType = 'store_credit';
+            if (rItem.restock_type === 'return') returnType = 'refund';
+            if (rItem.restock_type === 'exchange') returnType = 'exchange';
+
+            await pool.query(
+              `INSERT INTO returns (shopify_refund_id, order_id, product_id, variant_id, quantity, reason, return_type, refund_amount, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               ON CONFLICT (shopify_refund_id) DO UPDATE SET
+                  quantity = EXCLUDED.quantity, reason = EXCLUDED.reason, return_type = EXCLUDED.return_type, refund_amount = EXCLUDED.refund_amount`,
+              [getRefundRowId(refund, rItem), dbOrderId, productRef.rows[0]?.id || null, variantRef.rows[0]?.id || null, rItem.quantity, refund.note, returnType, refundAmount, refund.created_at]
+            );
+            returnsSynced++;
+          }
+        }
+
         ordersSynced++;
-        if (ordersSynced % 100 === 0) {
-          process.stdout.write(`[Progress] Processed ${ordersSynced}/${totalOrders} orders\n`);
+        if (ordersSynced % 50 === 0) {
+          log(`[Progress] Synced ${ordersSynced}/${totalOrders} orders (Last ID: ${order.id})`);
         }
       } catch (err) {
-        process.stdout.write(`✗ Failed order ${order.id}: ${err.message}\n`);
+        log(`✗ FAILED Order ${order.id}: ${err.message}`);
         recordsFailed++;
       }
     }
-    process.stdout.write(`✅ Step 2 Complete: ${ordersSynced} orders synced.\n`);
+    log(`✅ Steps 2 & 3 Complete: ${ordersSynced} orders and their refunds synced.`);
 
-    // 3. Sync Refunds/Returns (Optimized)
-    process.stdout.write('\n🔄 Step 3: Fetching Refunds (Recent & Necessary Only)...\n');
-    
-    // Get list of orders that already have returns synced
-    const existingReturnsRes = await pool.query('SELECT DISTINCT order_id FROM returns');
-    const ordersWithReturns = new Set(existingReturnsRes.rows.map(r => r.order_id));
-
-    const limit = pLimit(1); // One at a time to be safe with rate limits
-    const refundPromises = orders.map((order) => {
-      return limit(async () => {
-        try {
-          const dbOrderRef = await pool.query('SELECT id, financial_status FROM orders WHERE shopify_order_id = $1', [order.id]);
-          const dbOrder = dbOrderRef.rows[0];
-          if (!dbOrder) return;
-
-          const isOld = new Date(order.created_at) < new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-          const hasReturns = ordersWithReturns.has(dbOrder.id);
-
-          // Optimization: Skip if it's an old order that is already "paid" (unlikely to have new refund)
-          // OR if it's an old order and we already have its returns
-          if (isOld && (dbOrder.financial_status === 'paid' || hasReturns)) {
-            return;
-          }
-
-          const refunds = await fetchAllRefunds(order.id);
-          await delay(200); // Small breath between orders
-
-          for (const refund of refunds) {
-            const refundAmount = refund.transactions
-              ? refund.transactions.reduce((sum, t) => sum + parseFloat(t.amount), 0)
-              : 0;
-
-            for (const rItem of refund.refund_line_items) {
-              const lineItem = rItem.line_item;
-              const productRef = await pool.query('SELECT id FROM products WHERE shopify_product_id = $1', [lineItem.product_id]);
-              const variantRef = await pool.query('SELECT id FROM variants WHERE shopify_variant_id = $1', [lineItem.variant_id]);
-
-              let returnType = 'store_credit';
-              if (rItem.restock_type === 'return') returnType = 'refund';
-              if (rItem.restock_type === 'exchange') returnType = 'exchange';
-
-              await pool.query(
-                `INSERT INTO returns (shopify_refund_id, order_id, product_id, variant_id, quantity, reason, return_type, refund_amount, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                 ON CONFLICT (shopify_refund_id) DO UPDATE SET
-                    quantity = EXCLUDED.quantity,
-                    reason = EXCLUDED.reason,
-                    return_type = EXCLUDED.return_type,
-                    refund_amount = EXCLUDED.refund_amount`,
-                [refund.id, dbOrder.id, productRef.rows[0]?.id || null, variantRef.rows[0]?.id || null, rItem.quantity, refund.note, returnType, refundAmount, refund.created_at]
-              );
-              returnsSynced++;
-            }
-          }
-        } catch (err) {
-          process.stdout.write(`✗ Failed refund sync for order ${order.id}: ${err.message}\n`);
-        }
-      });
-    });
-
-    await Promise.all(refundPromises);
-    process.stdout.write('✅ Step 3 Complete.\n');
-
-    process.stdout.write('\n================================================\n');
-    process.stdout.write('✨ SUCCESS: Backfill Migration Complete\n');
-    process.stdout.write('================================================\n');
-    process.stdout.write(`📊 FINAL SUMMARY:\n`);
-    process.stdout.write(`- Products: ${productsSynced}\n`);
-    process.stdout.write(`- Orders: ${ordersSynced}\n`);
-    process.stdout.write(`- Line Items: ${lineItemsSynced}\n`);
-    process.stdout.write(`- Returns: ${returnsSynced}\n`);
-    process.stdout.write(`- Total Failures: ${recordsFailed}\n`);
-    process.stdout.write('================================================\n\n');
+    log('\n================================================');
+    log('✨ SUCCESS: BACKFILL MIGRATION COMPLETE');
+    log('================================================');
+    log(`📊 FINAL SUMMARY:`);
+    log(`- Products: ${productsSynced}`);
+    log(`- Orders: ${ordersSynced}`);
+    log(`- Line Items: ${lineItemsSynced}`);
+    log(`- Returns: ${returnsSynced}`);
+    log(`- Total Failures: ${recordsFailed}`);
+    log('================================================\n');
 
     await completeSyncLog(syncLogId, 'completed', ordersSynced);
   } catch (error) {
-    process.stdout.write(`\n❌ CRITICAL ERROR DURING BACKFILL: ${error.message}\n`);
+    log(`\n❌ CRITICAL ERROR DURING BACKFILL: ${error.message}`);
+    console.error(error); // Log full stack trace
     await completeSyncLog(syncLogId, 'failed', ordersSynced, error.message);
     throw error;
   }
@@ -222,11 +225,11 @@ const runBackfill = async () => {
 
 function parseVariantTitle(title) {
   if (!title) return { size: null, color: null };
-  if (!title.includes(' / ')) return { size: title, color: null };
+  if (!title.includes(' / ')) return { size: title.trim(), color: null };
   const parts = title.split(' / ');
   return {
-    size: parts[0] || null,
-    color: parts[1] || null
+    size: parts[0] ? parts[0].trim() : null,
+    color: parts[1] ? parts[1].trim() : null
   };
 }
 
@@ -247,59 +250,34 @@ async function completeSyncLog(id, status, records, error = null) {
 
 const runIncrementalSync = async () => {
   const syncLogId = await startSyncLog('incremental_sync');
-  let ordersSynced = 0;
-
   try {
-    process.stdout.write('\n⚡ Starting Incremental Shopify Sync...\n');
-
-    // 1. Find last order date
+    log('⚡ Starting Incremental Shopify Sync...');
     const lastOrderRes = await pool.query('SELECT MAX(ordered_at) FROM orders');
     const lastOrderDate = lastOrderRes.rows[0]?.max;
     
-    let sinceDate;
-    if (lastOrderDate) {
-      // Buffer by 1 minute to catch any orders missed at the exact second
-      sinceDate = new Date(new Date(lastOrderDate).getTime() + 60000);
-      process.stdout.write(`🔍 Syncing orders since: ${sinceDate.toISOString()}\n`);
-    } else {
-      process.stdout.write('⚠️ No previous orders found. Falling back to 7 days.\n');
-      sinceDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    }
+    const sinceDate = lastOrderDate ? new Date(new Date(lastOrderDate).getTime() + 60000) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    log(`🔍 Syncing orders since: ${sinceDate.toISOString()}`);
 
-    // 2. Fetch new orders
     const orders = await fetchAllOrders(null, sinceDate);
-    const totalOrders = orders.length;
-    process.stdout.write(`✅ Found ${totalOrders} new orders to sync.\n`);
-
-    if (totalOrders === 0) {
-      process.stdout.write('✨ Already up to date. No new orders found.\n');
+    if (orders.length === 0) {
+      log('✨ Already up to date.');
       await completeSyncLog(syncLogId, 'completed', 0);
       return { success: true, records_synced: 0 };
     }
 
-    // 3. Reuse order sync logic
-    // (For brevity in this file, we call a new private helper we'll create below)
-    ordersSynced = await processOrderBatch(orders);
-
-    process.stdout.write(`\n✨ SUCCESS: Incremental Sync Complete (${ordersSynced} orders)\n`);
-    await completeSyncLog(syncLogId, 'completed', ordersSynced);
-    return { success: true, records_synced: ordersSynced };
-
+    const synced = await processOrderBatch(orders);
+    log(`✨ SUCCESS: Incremental Sync Complete (${synced} orders)`);
+    await completeSyncLog(syncLogId, 'completed', synced);
+    return { success: true, records_synced: synced };
   } catch (error) {
-    process.stdout.write(`\n❌ ERROR DURING INCREMENTAL SYNC: ${error.message}\n`);
+    log(`❌ ERROR DURING INCREMENTAL SYNC: ${error.message}`);
     await completeSyncLog(syncLogId, 'failed', 0, error.message);
     throw error;
   }
 };
 
-/**
- * Shared order processing logic
- */
 async function processOrderBatch(orders) {
   let synced = 0;
-  const existingReturnsRes = await pool.query('SELECT DISTINCT order_id FROM returns');
-  const ordersWithReturns = new Set(existingReturnsRes.rows.map(r => r.order_id));
-
   for (const order of orders) {
     try {
       const fulfilledAt = order.fulfillments && order.fulfillments.length > 0 ? order.fulfillments[0].created_at : null;
@@ -319,7 +297,6 @@ async function processOrderBatch(orders) {
       );
 
       const dbOrderId = orderResult.rows[0].id;
-
       for (const item of order.line_items) {
         const productRef = await pool.query('SELECT id FROM products WHERE shopify_product_id = $1', [item.product_id]);
         const variantRef = await pool.query('SELECT id FROM variants WHERE shopify_variant_id = $1', [item.variant_id]);
@@ -335,7 +312,6 @@ async function processOrderBatch(orders) {
         );
       }
 
-      // Sync Refunds for this order
       const refunds = await fetchAllRefunds(order.id);
       for (const refund of refunds) {
         const refundAmount = refund.transactions ? refund.transactions.reduce((sum, t) => sum + parseFloat(t.amount), 0) : 0;
@@ -348,22 +324,114 @@ async function processOrderBatch(orders) {
           if (rItem.restock_type === 'return') returnType = 'refund';
           if (rItem.restock_type === 'exchange') returnType = 'exchange';
 
-          await pool.query(
+          await queryWithRetry(
             `INSERT INTO returns (shopify_refund_id, order_id, product_id, variant_id, quantity, reason, return_type, refund_amount, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (shopify_refund_id) DO UPDATE SET
                 quantity = EXCLUDED.quantity, reason = EXCLUDED.reason, return_type = EXCLUDED.return_type, refund_amount = EXCLUDED.refund_amount`,
-            [refund.id, dbOrderId, productRef.rows[0]?.id || null, variantRef.rows[0]?.id || null, rItem.quantity, refund.note, returnType, refundAmount, refund.created_at]
+            [getRefundRowId(refund, rItem), dbOrderId, productRef.rows[0]?.id || null, variantRef.rows[0]?.id || null, rItem.quantity, refund.note, returnType, refundAmount, refund.created_at]
           );
         }
       }
-      
       synced++;
     } catch (err) {
-      process.stdout.write(`✗ Failed processing order ${order.id}: ${err.message}\n`);
+      log(`✗ FAILED processing order ${order.id}: ${err.message}`);
     }
   }
   return synced;
 }
 
-module.exports = { runBackfill, runIncrementalSync };
+const runRefundSync = async () => {
+  const syncLogId = await startSyncLog('refund_sync');
+  let returnsSynced = 0;
+  let ordersChecked = 0;
+  let ordersFailed = 0;
+
+  try {
+    log('========================================');
+    log(`Starting refund-only sync for last ${REFUND_SYNC_DAYS} days`);
+    log('========================================');
+
+    const ordersRes = await queryWithRetry(
+      `SELECT id, shopify_order_id
+       FROM orders
+       WHERE ordered_at >= NOW() - ($1::INTEGER || ' days')::INTERVAL
+       ORDER BY ordered_at DESC`,
+      [REFUND_SYNC_DAYS]
+    );
+
+    const orders = ordersRes.rows;
+    log(`Found ${orders.length} orders to check for refunds`);
+
+    for (const order of orders) {
+      try {
+        ordersChecked++;
+        const refunds = await fetchAllRefunds(order.shopify_order_id);
+        await delay(150);
+
+        for (const refund of refunds) {
+          const refundAmount = refund.transactions
+            ? refund.transactions.reduce((sum, t) => sum + parseFloat(t.amount), 0)
+            : 0;
+
+          for (const rItem of refund.refund_line_items || []) {
+            const lineItem = rItem.line_item || {};
+            const productRef = await queryWithRetry('SELECT id FROM products WHERE shopify_product_id = $1', [lineItem.product_id]);
+            const variantRef = await queryWithRetry('SELECT id FROM variants WHERE shopify_variant_id = $1', [lineItem.variant_id]);
+
+            let returnType = 'store_credit';
+            if (rItem.restock_type === 'return') returnType = 'refund';
+            if (rItem.restock_type === 'exchange') returnType = 'exchange';
+
+            await queryWithRetry(
+              `INSERT INTO returns (shopify_refund_id, order_id, product_id, variant_id, quantity, reason, return_type, refund_amount, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               ON CONFLICT (shopify_refund_id) DO UPDATE SET
+                  quantity = EXCLUDED.quantity,
+                  reason = EXCLUDED.reason,
+                  return_type = EXCLUDED.return_type,
+                  refund_amount = EXCLUDED.refund_amount,
+                  product_id = EXCLUDED.product_id,
+                  variant_id = EXCLUDED.variant_id,
+                  created_at = EXCLUDED.created_at`,
+              [
+                getRefundRowId(refund, rItem),
+                order.id,
+                productRef.rows[0]?.id || null,
+                variantRef.rows[0]?.id || null,
+                rItem.quantity,
+                refund.note,
+                returnType,
+                refundAmount,
+                refund.created_at,
+              ]
+            );
+            returnsSynced++;
+          }
+        }
+
+        if (ordersChecked % 25 === 0) {
+          log(`[Progress] Checked ${ordersChecked}/${orders.length} orders, synced ${returnsSynced} refund rows`);
+        }
+      } catch (error) {
+        ordersFailed++;
+        log(`FAILED Refund for order ${order.shopify_order_id}: ${error.message}`);
+      }
+    }
+
+    log('========================================');
+    log('Refund-only sync completed');
+    log(`Orders checked: ${ordersChecked}`);
+    log(`Refund rows synced: ${returnsSynced}`);
+    log(`Orders failed: ${ordersFailed}`);
+    log('========================================');
+
+    await completeSyncLog(syncLogId, 'completed', returnsSynced);
+    return { success: true, orders_checked: ordersChecked, returns_synced: returnsSynced, orders_failed: ordersFailed };
+  } catch (error) {
+    await completeSyncLog(syncLogId, 'failed', returnsSynced, error.message);
+    throw error;
+  }
+};
+
+module.exports = { runBackfill, runIncrementalSync, runRefundSync };

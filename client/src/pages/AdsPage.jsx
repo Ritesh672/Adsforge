@@ -16,8 +16,13 @@ const getLocalDate = (daysOffset = 0) => {
   return `${year}-${month}-${day}`;
 };
 
+const getCompletedPeriodRange = (days) => ({
+  start: getLocalDate(-days),
+  end: getLocalDate(-1),
+});
+
 // Modern KPI Selector Card
-const KPICard = ({ label, value, icon, isActive, onClick, trend, trendUp, index }) => (
+const KPICard = ({ label, value, icon, isActive, onClick, trend, trendUp }) => (
   <div 
     className="kpi-selector-card"
     onClick={onClick}
@@ -114,17 +119,14 @@ const FunnelMiniCard = ({ label, value, isActive, onClick, icon, trend, trendUp 
 
 export default function AdsPage() {
   const [activePeriod, setActivePeriod] = useState('30d');
-  const [dateRange, setDateRange] = useState({ 
-    start: getLocalDate(-30), 
-    end: getLocalDate() 
-  });
+  const [dateRange, setDateRange] = useState(getCompletedPeriodRange(30));
   
   const [activeKPI, setActiveKPI] = useState('revenue');
-  const [activeFunnelMetric, setActiveFunnelMetric] = useState('impressions');
+  const [activeFunnelMetric, setActiveFunnelMetric] = useState('landing_page_views');
 
   const [overview, setOverview] = useState(null);
   const [daily, setDaily] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   const fetchData = useCallback(async (params) => {
     setLoading(true);
@@ -143,6 +145,7 @@ export default function AdsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData({ start_date: dateRange.start, end_date: dateRange.end });
   }, [dateRange, fetchData]);
 
@@ -154,7 +157,7 @@ export default function AdsPage() {
     else if (p === '7d') start = getLocalDate(-7);
     else if (p === '30d') start = getLocalDate(-30);
     else if (p === '90d') start = getLocalDate(-90);
-    setDateRange({ start, end: getLocalDate() });
+    setDateRange({ start, end: getLocalDate(-1) });
   };
 
   const kpiData = [
@@ -174,19 +177,30 @@ export default function AdsPage() {
     { id: 'frequency', label: 'Frequency', value: overview?.avg_frequency?.toFixed(2), icon: '🔄', trend: '2.3', trendUp: false },
   ];
 
-  const funnelBars = [
-    { label: 'Impressions', value: overview?.total_impressions, color: '#6c63ff' },
-    { label: 'Reach', value: overview?.total_reach, color: '#6c63ff' },
-    { label: 'Clicks', value: overview?.total_clicks, color: '#6c63ff' },
-    { label: 'Add to Cart', value: overview?.meta_add_to_cart, color: '#6c63ff' },
-    { label: 'Checkout Initiated', value: overview?.meta_initiate_checkout, color: '#6c63ff' },
-    { label: 'Purchases', value: overview?.meta_purchases, color: '#6c63ff' },
-  ];
+  const formatFunnelValue = (value) => {
+    const safeValue = Number(value || 0);
+    if (safeValue >= 1000000) return `${(safeValue / 1000000).toFixed(2)}M`;
+    if (safeValue >= 1000) return `${(safeValue / 1000).toFixed(1)}K`;
+    return safeValue.toLocaleString('en-IN');
+  };
 
-  const maxFunnel = Math.max(...funnelBars.map(b => b.value || 0));
+  const landingPageViews = overview?.total_landing_page_views ?? overview?.total_clicks;
+  const conversionFunnelMetrics = [
+    { id: 'landing_page_views', label: 'Landing Page', value: formatFunnelValue(landingPageViews), icon: 'LP' },
+    { id: 'meta_add_to_cart', label: 'Add to Cart', value: formatFunnelValue(overview?.meta_add_to_cart), icon: 'ATC' },
+    { id: 'meta_initiate_checkout', label: 'Checkout', value: formatFunnelValue(overview?.meta_initiate_checkout), icon: 'CO' },
+    { id: 'meta_purchases', label: 'Purchase', value: formatFunnelValue(overview?.meta_purchases), icon: 'P' },
+  ];
+  const conversionFunnelBars = [
+    { label: 'Landing Page', value: landingPageViews },
+    { label: 'Add to Cart', value: overview?.meta_add_to_cart },
+    { label: 'Checkout', value: overview?.meta_initiate_checkout },
+    { label: 'Purchase', value: overview?.meta_purchases },
+  ];
+  const conversionMaxFunnel = Math.max(...conversionFunnelBars.map(b => b.value || 0));
 
   const getMetricLabel = (id) => {
-    return kpiData.find(k => k.id === id)?.label || funnelMetrics.find(f => f.id === id)?.label || id;
+    return kpiData.find(k => k.id === id)?.label || conversionFunnelMetrics.find(f => f.id === id)?.label || funnelMetrics.find(f => f.id === id)?.label || id;
   };
 
   return (
@@ -353,14 +367,14 @@ export default function AdsPage() {
         <div style={{ marginBottom: '32px' }}>
           <div style={{ marginBottom: '16px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Conversion Funnel Metrics</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Select a metric to see its daily trend below</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Landing page uses available Meta clicks as the traffic proxy</p>
           </div>
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             gap: '12px'
           }}>
-            {funnelMetrics.map(m => (
+            {conversionFunnelMetrics.map(m => (
               <FunnelMiniCard 
                 key={m.id}
                 {...m}
@@ -382,13 +396,13 @@ export default function AdsPage() {
               Conversion Funnel
             </h3>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '24px' }}>
-              From impressions to purchases
+              Landing page to purchase
             </p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {funnelBars.map((bar, idx) => {
-                const percentage = (bar.value / funnelBars[0].value * 100).toFixed(1);
-                const dropoffFromPrev = idx > 0 ? (((funnelBars[idx-1].value - bar.value) / funnelBars[idx-1].value) * 100).toFixed(1) : 0;
+              {conversionFunnelBars.map((bar, idx) => {
+                const previousValue = conversionFunnelBars[idx - 1]?.value || 0;
+                const conversionFromPrev = idx > 0 && previousValue > 0 ? (bar.value / previousValue * 100).toFixed(1) : '100.0';
                 
                 return (
                   <div key={bar.label}>
@@ -397,15 +411,10 @@ export default function AdsPage() {
                         {bar.label}
                       </div>
                       <div style={{ display: 'flex', gap: '12px', alignItems: 'center', fontSize: '11px' }}>
-                        <span style={{ color: 'var(--text-muted)' }}>{bar.value?.toLocaleString() || '0'}</span>
-                        <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
-                          {percentage}%
+                        <span style={{ color: 'var(--text-muted)' }}>{bar.value?.toLocaleString('en-IN') || '0'}</span>
+                        <span style={{ color: idx === 0 ? 'var(--text-secondary)' : 'var(--green)', fontWeight: 700 }}>
+                          {conversionFromPrev}%
                         </span>
-                        {idx > 0 && (
-                          <span style={{ color: 'var(--red)', fontWeight: 600 }}>
-                            -{dropoffFromPrev}%
-                          </span>
-                        )}
                       </div>
                     </div>
                     <div style={{ 
@@ -416,7 +425,7 @@ export default function AdsPage() {
                     }}>
                       <div 
                         style={{ 
-                          width: `${(bar.value / maxFunnel * 100) || 0}%`, 
+                          width: `${(bar.value / conversionMaxFunnel * 100) || 0}%`, 
                           height: '100%',
                           background: 'linear-gradient(90deg, #6c63ff, #4cc9f0)',
                           borderRadius: '3px',
@@ -437,9 +446,9 @@ export default function AdsPage() {
               justifyContent: 'space-between',
               alignItems: 'center'
             }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Overall Conversion Rate</span>
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Landing Page to Purchase</span>
               <span style={{ fontSize: '18px', fontWeight: 800, color: '#6c63ff' }}>
-                {((overview?.meta_purchases / (overview?.total_impressions || 1)) * 100).toFixed(3)}%
+                {((overview?.meta_purchases / (landingPageViews || 1)) * 100).toFixed(3)}%
               </span>
             </div>
           </div>

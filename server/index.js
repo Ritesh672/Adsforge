@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const pool = require("./src/config/db");
 const cron = require('node-cron');
 
@@ -15,9 +16,20 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Helper for IST Timestamp
+const getISTTime = () => {
+  return new Date().toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }) + " IST";
+};
+
 // Global Request Logger
 app.use((req, res, next) => {
-  console.log(`Incoming Request: ${req.method} ${req.url}`);
+  console.log(`[${getISTTime()}] Incoming Request: ${req.method} ${req.url}`);
   next();
 });
 
@@ -32,9 +44,23 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+if (process.env.NODE_ENV === "production") {
+  const clientDistPath = path.join(__dirname, "..", "client", "dist");
+
+  app.use(express.static(clientDistPath));
+
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
+      return next();
+    }
+
+    return res.sendFile(path.join(clientDistPath, "index.html"));
+  });
+}
+
 // Nightly Meta sync at 2 AM IST (20:30 UTC)
 cron.schedule('30 20 * * *', async () => {
-  console.log('Running nightly Meta sync...');
+  console.log(`[${getISTTime()}] Running nightly Meta sync...`);
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const dateStr = yesterday.toISOString().split('T')[0];
@@ -70,21 +96,21 @@ cron.schedule('30 20 * * *', async () => {
           d.ctr, d.cpc, d.cpm, d.reach, d.frequency,
           d.meta_purchases, d.meta_purchase_value,
           d.meta_add_to_cart, d.meta_initiate_checkout]);
-      console.log(`Nightly Meta sync complete for ${dateStr}`);
+      console.log(`[${getISTTime()}] Nightly Meta sync complete for ${dateStr}`);
     }
   } catch (error) {
-    console.error('Nightly Meta sync failed:', error.message);
+    console.error(`[${getISTTime()}] Nightly Meta sync failed:`, error.message);
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`[${getISTTime()}] Server is running on port ${port}`);
   
   pool.query('SELECT NOW()', (err, res) => {
     if (err) {
-      console.error('Database connection error:', err.stack);
+      console.error(`[${getISTTime()}] Database connection error:`, err.stack);
     } else {
-      console.log('Database connection successful at:', res.rows[0].now);
+      console.log(`[${getISTTime()}] Database connection successful (Cloud)`);
     }
   });
 });

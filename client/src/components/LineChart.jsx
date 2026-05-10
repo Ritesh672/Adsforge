@@ -60,6 +60,7 @@ export default function LineChart({
       return `₹${val}`;
     }
     if (valueType === 'pct') return `${val.toFixed(1)}%`;
+    if (valueType === 'mult') return `${Number(val).toFixed(1)}x`;
     if (val >= 1e7) return `${(val / 1e7).toFixed(1)} Cr`;
     if (val >= 1e5) return `${(val / 1e5).toFixed(1)} L`;
     if (val >= 1e3) return `${(val / 1e3).toFixed(0)} K`;

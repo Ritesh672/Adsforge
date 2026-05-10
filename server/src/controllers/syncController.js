@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { runBackfill, runIncrementalSync } = require('../jobs/backfill');
+const { runMetaIncrementalSync } = require('../jobs/metaBackfill');
 const { handleOrderCreate, handleOrderUpdate, handleRefundCreate, handleProductUpdate } = require('../jobs/webhooks');
 
 const triggerBackfill = async (req, res) => {
@@ -33,6 +34,34 @@ const triggerIncrementalSync = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to start incremental sync',
+      error: error.message
+    });
+  }
+};
+
+const triggerUnifiedSync = async (req, res) => {
+  console.log('Received request for unified Meta + Shopify sync');
+  try {
+    Promise.allSettled([
+      runIncrementalSync(),
+      runMetaIncrementalSync(),
+    ]).then((results) => {
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length) {
+        console.error('Unified sync completed with failures:', failed.map((result) => result.reason?.message || result.reason));
+      } else {
+        console.log('Unified sync completed successfully');
+      }
+    });
+
+    res.status(202).json({
+      success: true,
+      message: 'Meta and Shopify sync started in the background'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to start unified sync',
       error: error.message
     });
   }
@@ -87,6 +116,7 @@ const handleWebhook = async (req, res, type) => {
 module.exports = {
   triggerBackfill,
   triggerIncrementalSync,
+  triggerUnifiedSync,
   getSyncStatus,
   handleWebhook
 };

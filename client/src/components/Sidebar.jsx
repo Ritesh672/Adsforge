@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 
 const navItems = [
   {
@@ -11,7 +11,9 @@ const navItems = [
   }
 ];
 
-export default function Sidebar({ syncStatus }) {
+export default function Sidebar({ syncStatus, onSyncNow }) {
+  const isSyncing = syncStatus === 'syncing';
+
   return (
     <aside className="sidebar">
       {/* Logo */}
@@ -43,17 +45,32 @@ export default function Sidebar({ syncStatus }) {
 
       {/* Sync Status */}
       <div className="sidebar-bottom">
+        <button
+          className="sync-now-button"
+          type="button"
+          onClick={onSyncNow}
+          disabled={isSyncing}
+        >
+          <span className="sync-now-left">
+            <span className="sync-icon-wrap">
+              <SyncIcon />
+            </span>
+            <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+          </span>
+          <span className="sync-shortcut">↻</span>
+        </button>
+
         <div className="sync-status">
           <div className={`sync-dot ${
-            syncStatus === 'syncing' ? 'loading' :
+            isSyncing ? 'loading' :
             syncStatus === 'error'   ? 'error'   : 'active'
           }`} />
           <div>
             <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-primary)' }}>
-              {syncStatus === 'syncing' ? 'Syncing data...' :
+              {isSyncing ? 'Syncing data...' :
                syncStatus === 'error'   ? 'Sync failed'    : 'Data up to date'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>Auto-synced on load</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>Manual Meta + Shopify sync</div>
           </div>
         </div>
       </div>
@@ -82,6 +99,17 @@ function ProductsIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
       <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+    </svg>
+  );
+}
+
+function SyncIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 0 1-15.5 6.2"/>
+      <path d="M3 12A9 9 0 0 1 18.5 5.8"/>
+      <path d="M18 2v4h4"/>
+      <path d="M6 22v-4H2"/>
     </svg>
   );
 }

@@ -10,7 +10,9 @@ const ReturnsTab = ({ dateRange, period }) => {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const params = period === 'custom' ? dateRange : { period };
+      const params = period === 'custom'
+        ? { start_date: dateRange.start, end_date: dateRange.end }
+        : { period };
       try {
         const res = await getReturns(params);
         setData(res.data);

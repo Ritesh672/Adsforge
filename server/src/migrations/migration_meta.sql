@@ -1,4 +1,4 @@
-CREATE TABLE daily_performance (
+CREATE TABLE IF NOT EXISTS daily_performance (
   id SERIAL PRIMARY KEY,
   date DATE UNIQUE NOT NULL,
   
@@ -13,6 +13,27 @@ CREATE TABLE daily_performance (
   frequency NUMERIC(8,4) DEFAULT 0,
   meta_purchases INTEGER DEFAULT 0,
   meta_purchase_value NUMERIC(10,2) DEFAULT 0,
+  meta_add_to_cart INTEGER DEFAULT 0,
+  meta_initiate_checkout INTEGER DEFAULT 0,
   
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE daily_performance
+  ADD COLUMN IF NOT EXISTS date DATE,
+  ADD COLUMN IF NOT EXISTS total_ad_spend NUMERIC(10,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS impressions INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS clicks INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ctr NUMERIC(8,4) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS cpc NUMERIC(10,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS cpm NUMERIC(10,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS reach INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS frequency NUMERIC(8,4) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS meta_purchases INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS meta_purchase_value NUMERIC(10,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS meta_add_to_cart INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS meta_initiate_checkout INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_performance_date_unique ON daily_performance(date);
+CREATE INDEX IF NOT EXISTS idx_daily_performance_created_at ON daily_performance(created_at);

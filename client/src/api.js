@@ -29,6 +29,7 @@ export const triggerMetaSync = ()       => api.post('/meta/sync');
 // Shopify
 export const triggerShopifySync = () => api.post('/sync/incremental');
 export const triggerShopifyBackfill = () => api.post('/sync/backfill');
+export const triggerUnifiedSync = () => api.post('/sync/all');
 
 // Products
 export const getTopProducts = (params) => api.get('/products', params);

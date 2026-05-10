@@ -72,6 +72,7 @@ exports.getOverview = async (req, res) => {
         avg_daily_spend: m.avg_daily_spend,
         total_impressions: m.total_impressions,
         total_clicks: m.total_clicks,
+        total_landing_page_views: m.total_clicks,
         total_reach: m.total_reach,
         avg_ctr: m.avg_ctr,
         avg_cpc: m.avg_cpc,
@@ -132,7 +133,7 @@ exports.getDailyData = async (req, res) => {
           GROUP BY 1
         ),
         daily_meta AS (
-          SELECT total_ad_spend, impressions, clicks, ctr, cpc, cpm, reach, frequency
+          SELECT total_ad_spend, impressions, clicks, ctr, cpc, cpm, reach, frequency, meta_purchases, meta_add_to_cart, meta_initiate_checkout
           FROM daily_performance
           WHERE date = $1
           LIMIT 1
@@ -143,6 +144,17 @@ exports.getDailyData = async (req, res) => {
           COALESCE(hs.revenue, 0)::FLOAT as revenue,
           COALESCE(hs.orders, 0)::INTEGER as orders,
           COALESCE(hs.units, 0)::INTEGER as units,
+          COALESCE(dm.impressions, 0)::INTEGER as impressions,
+          COALESCE(dm.clicks, 0)::INTEGER as clicks,
+          COALESCE(dm.clicks, 0)::INTEGER as landing_page_views,
+          COALESCE(dm.reach, 0)::INTEGER as reach,
+          COALESCE(dm.ctr, 0)::FLOAT as ctr,
+          COALESCE(dm.cpc, 0)::FLOAT as cpc,
+          COALESCE(dm.cpm, 0)::FLOAT as cpm,
+          COALESCE(dm.frequency, 0)::FLOAT as frequency,
+          COALESCE(dm.meta_purchases, 0)::INTEGER as meta_purchases,
+          COALESCE(dm.meta_add_to_cart, 0)::INTEGER as meta_add_to_cart,
+          COALESCE(dm.meta_initiate_checkout, 0)::INTEGER as meta_initiate_checkout,
           CASE WHEN hs.orders > 0 THEN hs.revenue / hs.orders ELSE 0 END as aov,
           CASE
             WHEN (COALESCE(dm.total_ad_spend, 0) / 24.0) > 0
@@ -183,6 +195,7 @@ exports.getDailyData = async (req, res) => {
           COALESCE(dm.total_ad_spend, 0)::FLOAT as spend,
           COALESCE(dm.impressions, 0)::INTEGER as impressions,
           COALESCE(dm.clicks, 0)::INTEGER as clicks,
+          COALESCE(dm.clicks, 0)::INTEGER as landing_page_views,
           COALESCE(dm.ctr, 0)::FLOAT as ctr,
           COALESCE(dm.cpc, 0)::FLOAT as cpc,
           COALESCE(dm.cpm, 0)::FLOAT as cpm,

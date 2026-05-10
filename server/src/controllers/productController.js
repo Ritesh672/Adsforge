@@ -9,33 +9,66 @@ exports.getAllProducts = async (req, res) => {
 
   try {
     const range = getDateRange(req.query);
+    const rangeStart = new Date(`${range.start}T00:00:00`);
+    const prevEndDate = new Date(rangeStart);
+    prevEndDate.setDate(prevEndDate.getDate() - 1);
+
+    const prevStartDate = new Date(prevEndDate);
+    prevStartDate.setDate(prevStartDate.getDate() - (range.days - 1));
+
+    const prevStart = prevStartDate.toISOString().split('T')[0];
+    const prevEnd = prevEndDate.toISOString().split('T')[0];
 
     let query = `
+      WITH current_sales AS (
+        SELECT
+          oli.product_id,
+          COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as total_revenue,
+          COALESCE(SUM(oli.quantity), 0)::INTEGER as total_units,
+          COUNT(DISTINCT o.id)::INTEGER as order_count
+        FROM order_line_items oli
+        JOIN orders o ON oli.order_id = o.id
+        WHERE o.ordered_at >= $1::DATE AND o.ordered_at < ($2::DATE + INTERVAL '1 day')
+        GROUP BY oli.product_id
+      ),
+      previous_sales AS (
+        SELECT
+          oli.product_id,
+          COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as prev_revenue
+        FROM order_line_items oli
+        JOIN orders o ON oli.order_id = o.id
+        WHERE o.ordered_at >= $3::DATE AND o.ordered_at < ($4::DATE + INTERVAL '1 day')
+        GROUP BY oli.product_id
+      ),
+      returns_by_product AS (
+        SELECT product_id, COUNT(*)::INTEGER as return_count
+        FROM returns
+        WHERE created_at >= $1::DATE AND created_at < ($2::DATE + INTERVAL '1 day')
+        GROUP BY product_id
+      )
       SELECT 
         p.id, p.shopify_product_id, p.title, p.vendor, p.product_type, p.tags, p.status, p.image_url,
-        COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as total_revenue,
-        COALESCE(SUM(oli.quantity), 0)::INTEGER as total_units,
-        COALESCE(COUNT(DISTINCT o.id), 0)::INTEGER as order_count,
+        COALESCE(cs.total_revenue, 0)::FLOAT as total_revenue,
+        COALESCE(cs.total_units, 0)::INTEGER as total_units,
+        COALESCE(cs.order_count, 0)::INTEGER as order_count,
         COALESCE(r.return_count, 0)::INTEGER as return_count,
-        CASE WHEN COUNT(DISTINCT o.id) > 0 
-             THEN (COALESCE(r.return_count, 0)::FLOAT / COUNT(DISTINCT o.id)::FLOAT * 100)
+        CASE WHEN COALESCE(cs.order_count, 0) > 0 
+             THEN (COALESCE(r.return_count, 0)::FLOAT / cs.order_count::FLOAT * 100)
              ELSE 0 END::FLOAT as return_rate,
-        CASE WHEN COUNT(DISTINCT o.id) > 0 
-             THEN (COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT / COUNT(DISTINCT o.id)::FLOAT)
-             ELSE 0 END::FLOAT as avg_order_value
+        CASE WHEN COALESCE(cs.order_count, 0) > 0 
+             THEN (COALESCE(cs.total_revenue, 0)::FLOAT / cs.order_count::FLOAT)
+             ELSE 0 END::FLOAT as avg_order_value,
+        CASE WHEN COALESCE(ps.prev_revenue, 0) > 0
+             THEN ((COALESCE(cs.total_revenue, 0) - ps.prev_revenue) / ps.prev_revenue * 100)
+             ELSE 0 END::FLOAT as mom_revenue_change_pct
       FROM products p
-      LEFT JOIN order_line_items oli ON p.id = oli.product_id
-      LEFT JOIN orders o ON oli.order_id = o.id AND o.${range.sqlFilterAlt}
-      LEFT JOIN (
-        SELECT product_id, COUNT(*) as return_count
-        FROM returns
-        WHERE ${range.sqlFilterCreatedAt}
-        GROUP BY product_id
-      ) r ON p.id = r.product_id
+      LEFT JOIN current_sales cs ON p.id = cs.product_id
+      LEFT JOIN previous_sales ps ON p.id = ps.product_id
+      LEFT JOIN returns_by_product r ON p.id = r.product_id
       WHERE 1=1
     `;
 
-    const sqlParams = [...range.params];
+    const sqlParams = [...range.params, prevStart, prevEnd];
     if (search) {
       sqlParams.push(`%${search}%`);
       query += ` AND p.title ILIKE $${sqlParams.length}`;
@@ -44,8 +77,6 @@ exports.getAllProducts = async (req, res) => {
       sqlParams.push(status);
       query += ` AND p.status = $${sqlParams.length}`;
     }
-
-    query += ` GROUP BY p.id, r.return_count`;
 
     // Sort
     switch (sort) {
@@ -57,26 +88,11 @@ exports.getAllProducts = async (req, res) => {
     }
 
     // Add LIMIT clause
-    sqlParams.push(parseInt(limit) || 50);
+    sqlParams.push(Math.min(parseInt(limit, 10) || 50, 200));
     query += ` LIMIT $${sqlParams.length}`;
 
     const result = await pool.query(query, sqlParams);
     const products = result.rows;
-
-    // Sparklines (fixed last 7 days for visual consistency)
-    for (let product of products) {
-      const sparklineRes = await pool.query(`
-        SELECT 
-          date_trunc('day', o.ordered_at)::DATE as date,
-          COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as revenue,
-          COALESCE(SUM(oli.quantity), 0)::INTEGER as units
-        FROM order_line_items oli
-        JOIN orders o ON oli.order_id = o.id
-        WHERE oli.product_id = $1 AND o.ordered_at >= NOW() - INTERVAL '7 days'
-        GROUP BY 1 ORDER BY 1 ASC
-      `, [product.id]);
-      product.sparkline = sparklineRes.rows;
-    }
 
     res.json({
       success: true,
