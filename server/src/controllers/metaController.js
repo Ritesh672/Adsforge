@@ -201,7 +201,9 @@ exports.getDailyData = async (req, res) => {
           LIMIT 1
         )
         SELECT
+          ($1::DATE + (hb.hour || ' hours')::INTERVAL) as date,
           hb.hour,
+          LPAD(hb.hour::TEXT, 2, '0') || ':00' as hour_label,
           (COALESCE(dm.total_ad_spend, 0) / 24.0)::FLOAT as spend,
           COALESCE(hs.revenue, 0)::FLOAT as revenue,
           COALESCE(hs.orders, 0)::INTEGER as orders,

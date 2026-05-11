@@ -21,6 +21,19 @@ const getCompletedPeriodRange = (days) => ({
   end: getLocalDate(-1),
 });
 
+const formatAdsAxisDate = (value, row) => {
+  if (row?.hour_label) return row.hour_label;
+  if (typeof value === 'string' && /^\d{2}:00$/.test(value)) return value;
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+};
+
+const formatBreakdownDate = (row) => {
+  if (row?.hour_label) return row.hour_label;
+  if (!row?.date) return '-';
+  return new Date(row.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' });
+};
+
 // Modern KPI Selector Card
 const KPICard = ({ label, value, icon, isActive, onClick, trend, trendUp }) => (
   <div 
@@ -97,7 +110,6 @@ const FunnelMiniCard = ({ label, value, isActive, onClick, icon, trend, trendUp 
     onMouseLeave={(e) => !isActive && (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)')}
   >
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <div style={{ fontSize: '14px' }}>{icon}</div>
       <div>
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
           {label}
@@ -122,10 +134,11 @@ export default function AdsPage() {
   const [dateRange, setDateRange] = useState(getCompletedPeriodRange(30));
   
   const [activeKPI, setActiveKPI] = useState('revenue');
-  const [activeFunnelMetric, setActiveFunnelMetric] = useState('landing_page_views');
+  const [activeFunnelMetric, setActiveFunnelMetric] = useState('cpc');
 
   const [overview, setOverview] = useState(null);
   const [daily, setDaily] = useState([]);
+  const [isHourly, setIsHourly] = useState(false);
   const [, setLoading] = useState(true);
 
   const fetchData = useCallback(async (params) => {
@@ -137,6 +150,7 @@ export default function AdsPage() {
       ]);
       setOverview(ov.data);
       setDaily(dl.data.daily || []);
+      setIsHourly(Boolean(dl.data.is_hourly));
     } catch (e) {
       console.error(e);
     } finally {
@@ -232,11 +246,18 @@ export default function AdsPage() {
   };
 
   const landingPageViews = overview?.total_landing_page_views ?? overview?.total_clicks;
-  const conversionFunnelMetrics = [
-    { id: 'landing_page_views', label: 'Landing Page', value: formatFunnelValue(landingPageViews), icon: 'LP' },
-    { id: 'meta_add_to_cart', label: 'Add to Cart', value: formatFunnelValue(overview?.meta_add_to_cart), icon: 'ATC' },
-    { id: 'meta_initiate_checkout', label: 'Checkout', value: formatFunnelValue(overview?.meta_initiate_checkout), icon: 'CO' },
-    { id: 'meta_purchases', label: 'Purchase', value: formatFunnelValue(overview?.meta_purchases), icon: 'P' },
+  const formatEfficiencyValue = (metric, value) => {
+    const safeValue = Number(value || 0);
+    if (metric === 'cpc' || metric === 'cpm') return fmt(safeValue);
+    if (metric === 'ctr') return `${safeValue.toFixed(2)}%`;
+    return formatFunnelValue(safeValue);
+  };
+  const adEfficiencyMetrics = [
+    { id: 'cpc', label: 'CPC', value: formatEfficiencyValue('cpc', overview?.avg_cpc), icon: 'CPC' },
+    { id: 'ctr', label: 'CTR', value: formatEfficiencyValue('ctr', overview?.avg_ctr), icon: 'CTR' },
+    { id: 'cpm', label: 'CPM', value: formatEfficiencyValue('cpm', overview?.avg_cpm), icon: 'CPM' },
+    { id: 'meta_add_to_cart', label: 'Add to Cart', value: formatEfficiencyValue('meta_add_to_cart', overview?.meta_add_to_cart), icon: 'ATC' },
+    { id: 'landing_page_views', label: 'Sessions', value: formatEfficiencyValue('landing_page_views', landingPageViews), icon: 'SES' },
   ];
   const conversionFunnelBars = [
     { label: 'Landing Page', value: landingPageViews },
@@ -246,8 +267,14 @@ export default function AdsPage() {
   ];
   const conversionMaxFunnel = Math.max(...conversionFunnelBars.map(b => b.value || 0));
   const getMetricLabel = (id) => {
-    return kpiCards.find(k => k.id === id)?.label || conversionFunnelMetrics.find(f => f.id === id)?.label || funnelCards.find(f => f.id === id)?.label || id;
+    return kpiCards.find(k => k.id === id)?.label || adEfficiencyMetrics.find(f => f.id === id)?.label || funnelCards.find(f => f.id === id)?.label || id;
   };
+  const formatEfficiencyAxis = (value) => {
+    if (activeFunnelMetric === 'cpc' || activeFunnelMetric === 'cpm') return `₹${Number(value || 0).toFixed(0)}`;
+    if (activeFunnelMetric === 'ctr') return `${Number(value || 0).toFixed(1)}%`;
+    return value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : (value >= 1000 ? `${(value / 1000).toFixed(0)}K` : value);
+  };
+  const formatEfficiencyTooltip = (value) => formatEfficiencyValue(activeFunnelMetric, value);
 
   return (
     <>
@@ -316,9 +343,9 @@ export default function AdsPage() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
                   <XAxis 
-                    dataKey="date" 
+                    dataKey={isHourly ? 'hour_label' : 'date'} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
-                    tickFormatter={(str) => new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    tickFormatter={formatAdsAxisDate}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -336,6 +363,7 @@ export default function AdsPage() {
                       boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
                     }}
                     labelStyle={{ color: 'var(--text-primary)' }}
+                    labelFormatter={(value, payload) => formatAdsAxisDate(value, payload?.[0]?.payload)}
                   />
                   <Area 
                     type="monotone" 
@@ -378,9 +406,9 @@ export default function AdsPage() {
                 <LineChart data={daily} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
                   <XAxis 
-                    dataKey="date" 
+                    dataKey={isHourly ? 'hour_label' : 'date'} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
-                    tickFormatter={(str) => new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    tickFormatter={formatAdsAxisDate}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -398,6 +426,7 @@ export default function AdsPage() {
                       boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
                     }}
                     labelStyle={{ color: 'var(--text-primary)' }}
+                    labelFormatter={(value, payload) => formatAdsAxisDate(value, payload?.[0]?.payload)}
                   />
                   <Line type="monotone" dataKey="revenue" stroke="#6c63ff" strokeWidth={2.5} dot={false} isAnimationActive={true} />
                   <Line type="monotone" dataKey="spend" stroke="#00d4a0" strokeWidth={2.5} dot={false} isAnimationActive={true} />
@@ -412,15 +441,15 @@ export default function AdsPage() {
             ═══════════════════════════════════════════════════════════ */}
         <div style={{ marginBottom: '32px' }}>
           <div style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Conversion Funnel Metrics</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Landing page uses available Meta clicks as the traffic proxy</p>
+            <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Ad Efficiency Metrics</h3>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>CPC, CTR, CPM, add to cart, and session trends</p>
           </div>
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             gap: '12px'
           }}>
-            {conversionFunnelMetrics.map(m => (
+            {adEfficiencyMetrics.map(m => (
               <FunnelMiniCard 
                 key={m.id}
                 {...m}
@@ -499,7 +528,7 @@ export default function AdsPage() {
             </div>
           </div>
 
-          {/* RIGHT: Dynamic Funnel Metric Trend */}
+          {/* RIGHT: Dynamic Ad Efficiency Metric Trend */}
           <div className="card" style={{ padding: '28px', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
               <div>
@@ -528,9 +557,9 @@ export default function AdsPage() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
                   <XAxis 
-                    dataKey="date" 
+                    dataKey={isHourly ? 'hour_label' : 'date'} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
-                    tickFormatter={(str) => new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    tickFormatter={formatAdsAxisDate}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -538,7 +567,7 @@ export default function AdsPage() {
                     axisLine={false} 
                     tickLine={false} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
-                    tickFormatter={(v) => v >= 1000000 ? (v/1000000).toFixed(1) + 'M' : (v >= 1000 ? (v/1000).toFixed(0) + 'K' : v)}
+                    tickFormatter={formatEfficiencyAxis}
                   />
                   <Tooltip 
                     contentStyle={{ 
@@ -548,6 +577,8 @@ export default function AdsPage() {
                       boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
                     }}
                     labelStyle={{ color: 'var(--text-primary)' }}
+                    labelFormatter={(value, payload) => formatAdsAxisDate(value, payload?.[0]?.payload)}
+                    formatter={(value) => [formatEfficiencyTooltip(value), getMetricLabel(activeFunnelMetric)]}
                   />
                   <Area 
                     type="monotone" 
@@ -649,7 +680,7 @@ export default function AdsPage() {
                   const isEvenRow = idx % 2 === 0;
                   
                   return (
-                    <tr key={r.date} style={{
+                    <tr key={r.date || r.hour} style={{
                       background: isEvenRow ? 'transparent' : 'rgba(255,255,255,0.01)',
                       borderBottom: '1px solid rgba(255,255,255,0.04)',
                       transition: 'background 0.2s',
@@ -659,7 +690,7 @@ export default function AdsPage() {
                     onMouseLeave={(e) => e.currentTarget.style.background = isEvenRow ? 'transparent' : 'rgba(255,255,255,0.01)'}
                     >
                       <td style={{ padding: '14px 20px', color: 'var(--text-primary)', fontWeight: 600 }}>
-                        {new Date(r.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+                        {formatBreakdownDate(r)}
                       </td>
                       <td style={{ padding: '14px 12px', textAlign: 'right', color: 'var(--text-primary)', fontWeight: 600 }}>
                         {fmt(r.spend)}
