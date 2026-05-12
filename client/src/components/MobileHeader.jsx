@@ -23,7 +23,9 @@ export default function MobileHeader({ isOpen, onOpen, onClose, syncStatus, last
     <>
       <header className="mobile-app-header">
         <div className="mobile-brand">
-          <div className="mobile-brand-mark">A</div>
+          <div className="mobile-brand-mark">
+            <img src="/logo.png" alt="AdForge logo" className="brand-logo-img" />
+          </div>
           <div>
             <strong>AdForge</strong>
             <span>Analytics</span>
@@ -44,7 +46,9 @@ export default function MobileHeader({ isOpen, onOpen, onClose, syncStatus, last
       <aside className={`mobile-drawer ${isOpen ? 'open' : ''}`} aria-hidden={!isOpen}>
         <div className="mobile-drawer-header">
           <div className="mobile-brand">
-            <div className="mobile-brand-mark">A</div>
+            <div className="mobile-brand-mark">
+              <img src="/logo.png" alt="AdForge logo" className="brand-logo-img" />
+            </div>
             <div>
               <strong>AdForge</strong>
               <span>Mobile menu</span>

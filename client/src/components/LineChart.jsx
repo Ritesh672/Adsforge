@@ -26,15 +26,19 @@ export default function LineChart({
   subtitle,
   data = [],
   currentKey,
+  secondaryKey,
   previousKey,
   currentName,
+  secondaryName,
   previousName,
   currentColor,
+  secondaryColor = '#00d4a0',
   previousColor = '#444466',
   valueType = 'currency',
   statItems = [],
   loading = false,
   hideHeader = false,
+  forceHourlyXAxis = false,
 }) {
 
   const formatXAxis = (tick) => {
@@ -45,7 +49,7 @@ export default function LineChart({
     const isHourly = data.length > 0 && 
       new Date(data[0].date).toDateString() === new Date(data[data.length - 1].date).toDateString();
     
-    if (isHourly) {
+    if (isHourly || forceHourlyXAxis) {
       return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
     }
     
@@ -84,6 +88,12 @@ export default function LineChart({
               <div className="legend-item">
                 <span className="legend-dashed" style={{ borderTopColor: previousColor }} />
                 {previousName}
+              </div>
+            )}
+            {secondaryKey && (
+              <div className="legend-item">
+                <span className="legend-dot" style={{ background: secondaryColor }} />
+                {secondaryName}
               </div>
             )}
           </div>
@@ -134,6 +144,18 @@ export default function LineChart({
                   strokeDasharray="5 5"
                   fill="none"
                   dot={false}
+                />
+              )}
+              {secondaryKey && (
+                <Area
+                  type="monotone"
+                  dataKey={secondaryKey}
+                  name={secondaryName}
+                  stroke={secondaryColor}
+                  strokeWidth={2.5}
+                  fill="none"
+                  dot={false}
+                  activeDot={{ r: 4, fill: secondaryColor, stroke: '#0a0a0f', strokeWidth: 2 }}
                 />
               )}
               {/* Current period solid */}

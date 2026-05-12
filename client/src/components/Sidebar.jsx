@@ -28,7 +28,9 @@ export default function Sidebar({ syncStatus, lastSyncedAt, onSyncNow }) {
     <aside className="sidebar">
       {/* Logo */}
       <div className="sidebar-logo">
-        <div className="logo-icon">⚡</div>
+        <div className="logo-icon">
+          <img src="/logo.png" alt="AdForge logo" className="brand-logo-img" />
+        </div>
         <div className="logo-text">
           <h2>AdForge</h2>
           <span>Analytics Dashboard</span>

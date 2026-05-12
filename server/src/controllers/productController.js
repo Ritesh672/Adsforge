@@ -28,7 +28,9 @@ exports.getAllProducts = async (req, res) => {
           COUNT(DISTINCT o.id)::INTEGER as order_count
         FROM order_line_items oli
         JOIN orders o ON oli.order_id = o.id
-        WHERE o.ordered_at >= $1::DATE AND o.ordered_at < ($2::DATE + INTERVAL '1 day')
+        WHERE o.ordered_at AT TIME ZONE 'Asia/Kolkata' >= $1::DATE
+          AND o.ordered_at AT TIME ZONE 'Asia/Kolkata' < ($2::DATE + INTERVAL '1 day')
+          AND o.financial_status != 'voided'
         GROUP BY oli.product_id
       ),
       previous_sales AS (
@@ -37,13 +39,16 @@ exports.getAllProducts = async (req, res) => {
           COALESCE(SUM(oli.price * oli.quantity), 0)::FLOAT as prev_revenue
         FROM order_line_items oli
         JOIN orders o ON oli.order_id = o.id
-        WHERE o.ordered_at >= $3::DATE AND o.ordered_at < ($4::DATE + INTERVAL '1 day')
+        WHERE o.ordered_at AT TIME ZONE 'Asia/Kolkata' >= $3::DATE
+          AND o.ordered_at AT TIME ZONE 'Asia/Kolkata' < ($4::DATE + INTERVAL '1 day')
+          AND o.financial_status != 'voided'
         GROUP BY oli.product_id
       ),
       returns_by_product AS (
         SELECT product_id, COUNT(*)::INTEGER as return_count
         FROM returns
-        WHERE created_at >= $1::DATE AND created_at < ($2::DATE + INTERVAL '1 day')
+        WHERE created_at AT TIME ZONE 'Asia/Kolkata' >= $1::DATE
+          AND created_at AT TIME ZONE 'Asia/Kolkata' < ($2::DATE + INTERVAL '1 day')
         GROUP BY product_id
       )
       SELECT 

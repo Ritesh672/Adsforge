@@ -326,7 +326,7 @@ export default function AdsPage() {
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(108, 99, 255, 0.1)', borderRadius: '8px' }}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#6c63ff' }}></div>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)' }}></div>
                 <span style={{ fontSize: '11px', color: 'var(--text-primary)', fontWeight: 600 }}>
                   {getMetricLabel(activeKPI)}
                 </span>
@@ -337,11 +337,11 @@ export default function AdsPage() {
                 <AreaChart data={daily} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6c63ff" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#6c63ff" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="var(--accent)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
                   <XAxis 
                     dataKey={isHourly ? 'hour_label' : 'date'} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
@@ -368,7 +368,7 @@ export default function AdsPage() {
                   <Area 
                     type="monotone" 
                     dataKey={activeKPI === 'roas' ? 'real_roas' : (activeKPI === 'revenue' ? 'revenue' : activeKPI)} 
-                    stroke="#6c63ff" 
+                    stroke="var(--accent)" 
                     fillOpacity={1} 
                     fill="url(#colorMetric)" 
                     strokeWidth={2.5}
@@ -392,11 +392,11 @@ export default function AdsPage() {
               </div>
               <div style={{ display: 'flex', gap: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{ width: '3px', height: '12px', borderRadius: '2px', background: '#6c63ff' }}></div>
+                  <div style={{ width: '3px', height: '12px', borderRadius: '2px', background: 'var(--accent)' }}></div>
                   <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Revenue</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{ width: '3px', height: '12px', borderRadius: '2px', background: '#00d4a0' }}></div>
+                  <div style={{ width: '3px', height: '12px', borderRadius: '2px', background: 'var(--green)' }}></div>
                   <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Spend</span>
                 </div>
               </div>
@@ -404,7 +404,7 @@ export default function AdsPage() {
             <div style={{ flex: 1, minHeight: '340px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={daily} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
                   <XAxis 
                     dataKey={isHourly ? 'hour_label' : 'date'} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
@@ -428,8 +428,8 @@ export default function AdsPage() {
                     labelStyle={{ color: 'var(--text-primary)' }}
                     labelFormatter={(value, payload) => formatAdsAxisDate(value, payload?.[0]?.payload)}
                   />
-                  <Line type="monotone" dataKey="revenue" stroke="#6c63ff" strokeWidth={2.5} dot={false} isAnimationActive={true} />
-                  <Line type="monotone" dataKey="spend" stroke="#00d4a0" strokeWidth={2.5} dot={false} isAnimationActive={true} />
+                  <Line type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} dot={false} isAnimationActive={true} />
+                  <Line type="monotone" dataKey="spend" stroke="var(--green)" strokeWidth={2.5} dot={false} isAnimationActive={true} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -494,7 +494,7 @@ export default function AdsPage() {
                     </div>
                     <div style={{ 
                       height: '6px', 
-                      background: 'rgba(255,255,255,0.04)', 
+                      background: 'var(--border)', 
                       borderRadius: '3px',
                       overflow: 'hidden'
                     }}>
@@ -502,7 +502,7 @@ export default function AdsPage() {
                         style={{ 
                           width: `${(bar.value / conversionMaxFunnel * 100) || 0}%`, 
                           height: '100%',
-                          background: 'linear-gradient(90deg, #6c63ff, #4cc9f0)',
+                          background: 'linear-gradient(90deg, var(--accent), var(--blue))',
                           borderRadius: '3px',
                           transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
                         }}
@@ -522,7 +522,7 @@ export default function AdsPage() {
               alignItems: 'center'
             }}>
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Landing Page to Purchase</span>
-              <span style={{ fontSize: '18px', fontWeight: 800, color: '#6c63ff' }}>
+              <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--accent)' }}>
                 {((overview?.meta_purchases / (landingPageViews || 1)) * 100).toFixed(3)}%
               </span>
             </div>
@@ -540,7 +540,7 @@ export default function AdsPage() {
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(0, 212, 160, 0.1)', borderRadius: '8px' }}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#00d4a0' }}></div>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--green)' }}></div>
                 <span style={{ fontSize: '11px', color: 'var(--text-primary)', fontWeight: 600 }}>
                   {getMetricLabel(activeFunnelMetric)}
                 </span>
@@ -551,11 +551,11 @@ export default function AdsPage() {
                 <AreaChart data={daily} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorFunnel" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#00d4a0" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#00d4a0" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="var(--green)" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="var(--green)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
                   <XAxis 
                     dataKey={isHourly ? 'hour_label' : 'date'} 
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
@@ -583,7 +583,7 @@ export default function AdsPage() {
                   <Area 
                     type="monotone" 
                     dataKey={activeFunnelMetric} 
-                    stroke="#00d4a0" 
+                    stroke="var(--green)" 
                     fillOpacity={1} 
                     fill="url(#colorFunnel)" 
                     strokeWidth={2.5}
@@ -682,7 +682,7 @@ export default function AdsPage() {
                   return (
                     <tr key={r.date || r.hour} style={{
                       background: isEvenRow ? 'transparent' : 'rgba(255,255,255,0.01)',
-                      borderBottom: '1px solid rgba(255,255,255,0.04)',
+                      borderBottom: '1px solid var(--border)',
                       transition: 'background 0.2s',
                       cursor: 'pointer'
                     }}

@@ -837,8 +837,8 @@ canvas {
     border-radius: 9px;
     background: linear-gradient(135deg, var(--accent), var(--blue));
     color: #fff;
-    font-size: 13px;
-    font-weight: 800;
+    padding: 3px;
+    overflow: hidden;
   }
 
   .mobile-brand strong {

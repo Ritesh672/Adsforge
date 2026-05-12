@@ -63,6 +63,8 @@ exports.getOverview = async (req, res) => {
         COALESCE(SUM(clicks), 0)::INTEGER as total_clicks,
         COALESCE(SUM(reach), 0)::INTEGER as total_reach,
         COALESCE(SUM(meta_purchases), 0)::INTEGER as total_meta_purchases,
+        ROUND(AVG(ctr)::numeric, 4)::FLOAT as avg_ctr,
+        ROUND(AVG(cpc)::numeric, 2)::FLOAT as avg_cpc,
         ROUND(AVG(frequency)::numeric, 2)::FLOAT as avg_frequency,
         COALESCE(SUM(meta_add_to_cart), 0)::INTEGER as total_meta_add_to_cart,
         COALESCE(SUM(meta_initiate_checkout), 0)::INTEGER as total_meta_initiate_checkout
@@ -73,24 +75,24 @@ exports.getOverview = async (req, res) => {
     // 2. Get Shopify Ground Truth Metrics
     const shopifyRes = await pool.query(`
       SELECT
-        COALESCE(SUM(total_price), 0)::FLOAT as shopify_revenue,
-        COUNT(*)::INTEGER as shopify_orders,
-        COALESCE(SUM(total_items), 0)::INTEGER as shopify_units
+        COALESCE(SUM(total_price) FILTER (WHERE financial_status != 'voided'), 0)::FLOAT as shopify_revenue,
+        (COUNT(*) FILTER (WHERE financial_status != 'voided'))::INTEGER as shopify_orders,
+        COALESCE(SUM(total_items) FILTER (WHERE financial_status != 'voided'), 0)::INTEGER as shopify_units,
+        (COUNT(*) FILTER (WHERE financial_status = 'voided'))::INTEGER as cancelled_orders
       FROM orders
       WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 
       AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
-      AND financial_status != 'voided'
     `, [range.start, range.end]);
 
     const prevShopifyRes = await pool.query(`
       SELECT
-        COALESCE(SUM(total_price), 0)::FLOAT as shopify_revenue,
-        COUNT(*)::INTEGER as shopify_orders,
-        COALESCE(SUM(total_items), 0)::INTEGER as shopify_units
+        COALESCE(SUM(total_price) FILTER (WHERE financial_status != 'voided'), 0)::FLOAT as shopify_revenue,
+        (COUNT(*) FILTER (WHERE financial_status != 'voided'))::INTEGER as shopify_orders,
+        COALESCE(SUM(total_items) FILTER (WHERE financial_status != 'voided'), 0)::INTEGER as shopify_units,
+        (COUNT(*) FILTER (WHERE financial_status = 'voided'))::INTEGER as cancelled_orders
       FROM orders
       WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 
       AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
-      AND financial_status != 'voided'
     `, [prevStart, prevEnd]);
 
     const m = metaRes.rows[0];
@@ -128,6 +130,10 @@ exports.getOverview = async (req, res) => {
         shopify_revenue: s.shopify_revenue,
         shopify_orders: s.shopify_orders,
         shopify_units: s.shopify_units,
+        cancelled_orders: s.cancelled_orders,
+        cancel_rate: (Number(s.shopify_orders || 0) + Number(s.cancelled_orders || 0)) > 0
+          ? (Number(s.cancelled_orders || 0) / (Number(s.shopify_orders || 0) + Number(s.cancelled_orders || 0)) * 100)
+          : 0,
         real_roas,
         cost_per_order,
         avg_order_value,
@@ -138,6 +144,8 @@ exports.getOverview = async (req, res) => {
           total_clicks: percentChange(m.total_clicks, pm.total_clicks),
           total_landing_page_views: percentChange(m.total_clicks, pm.total_clicks),
           total_reach: percentChange(m.total_reach, pm.total_reach),
+          avg_ctr: percentChange(m.avg_ctr, pm.avg_ctr),
+          avg_cpc: percentChange(m.avg_cpc, pm.avg_cpc),
           avg_frequency: percentChange(m.avg_frequency, pm.avg_frequency),
           meta_purchases: percentChange(m.total_meta_purchases, pm.total_meta_purchases),
           meta_add_to_cart: percentChange(m.total_meta_add_to_cart, pm.total_meta_add_to_cart),
@@ -145,6 +153,7 @@ exports.getOverview = async (req, res) => {
           shopify_revenue: percentChange(s.shopify_revenue, ps.shopify_revenue),
           shopify_orders: percentChange(s.shopify_orders, ps.shopify_orders),
           shopify_units: percentChange(s.shopify_units, ps.shopify_units),
+          cancelled_orders: percentChange(s.cancelled_orders, ps.cancelled_orders),
           real_roas: percentChange(real_roas, prev_real_roas),
           cost_per_order: percentChange(cost_per_order, prev_cost_per_order),
           avg_order_value: percentChange(avg_order_value, prev_avg_order_value)
@@ -186,12 +195,12 @@ exports.getDailyData = async (req, res) => {
         hourly_shopify AS (
           SELECT
             DATE_PART('hour', ordered_at AT TIME ZONE 'Asia/Kolkata') as hour,
-            SUM(total_price) as revenue,
-            COUNT(*) as orders,
-            SUM(total_items) as units
+            SUM(total_price) FILTER (WHERE financial_status != 'voided') as revenue,
+            COUNT(*) FILTER (WHERE financial_status != 'voided') as orders,
+            SUM(total_items) FILTER (WHERE financial_status != 'voided') as units,
+            COUNT(*) FILTER (WHERE financial_status = 'voided') as cancelled_orders
           FROM orders
           WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date = $1
-          AND financial_status != 'voided'
           GROUP BY 1
         ),
         daily_meta AS (
@@ -208,6 +217,7 @@ exports.getDailyData = async (req, res) => {
           COALESCE(hs.revenue, 0)::FLOAT as revenue,
           COALESCE(hs.orders, 0)::INTEGER as orders,
           COALESCE(hs.units, 0)::INTEGER as units,
+          COALESCE(hs.cancelled_orders, 0)::INTEGER as cancelled_orders,
           COALESCE(dm.impressions, 0)::INTEGER as impressions,
           COALESCE(dm.clicks, 0)::INTEGER as clicks,
           COALESCE(dm.clicks, 0)::INTEGER as landing_page_views,
@@ -245,13 +255,13 @@ exports.getDailyData = async (req, res) => {
         daily_shopify AS (
           SELECT
             (ordered_at AT TIME ZONE 'Asia/Kolkata')::date as date,
-            SUM(total_price) as shopify_revenue,
-            COUNT(*) as shopify_orders,
-            SUM(total_items) as shopify_units,
-            AVG(total_price) as avg_order_value
+            SUM(total_price) FILTER (WHERE financial_status != 'voided') as shopify_revenue,
+            COUNT(*) FILTER (WHERE financial_status != 'voided') as shopify_orders,
+            SUM(total_items) FILTER (WHERE financial_status != 'voided') as shopify_units,
+            AVG(total_price) FILTER (WHERE financial_status != 'voided') as avg_order_value,
+            COUNT(*) FILTER (WHERE financial_status = 'voided') as cancelled_orders
           FROM orders
-          WHERE financial_status != 'voided'
-          AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
+          WHERE (ordered_at AT TIME ZONE 'Asia/Kolkata')::date >= $1 AND (ordered_at AT TIME ZONE 'Asia/Kolkata')::date <= $2
           GROUP BY 1
         )
         SELECT
@@ -271,6 +281,7 @@ exports.getDailyData = async (req, res) => {
           COALESCE(ds.shopify_revenue, 0)::FLOAT as revenue,
           COALESCE(ds.shopify_orders, 0)::INTEGER as orders,
           COALESCE(ds.shopify_units, 0)::INTEGER as units,
+          COALESCE(ds.cancelled_orders, 0)::INTEGER as cancelled_orders,
           COALESCE(ds.avg_order_value, 0)::FLOAT as aov,
           CASE
             WHEN COALESCE(dm.total_ad_spend, 0) > 0
